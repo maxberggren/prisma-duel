@@ -375,8 +375,9 @@ const RULES = {
   CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
-  HULL_R: 0.021,            // collision/hit radius
-  MUZZLE_CLEAR: 0.033,      // ships keep this clear of prisms, so the muzzle
+  HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
+                            // hull, so a visible wingtip graze actually registers
+  MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
   COLLIDE_DMG: 26,
 
@@ -1181,16 +1182,6 @@ float sdTri(vec2 p, vec2 a, vec2 b, vec2 c){
                  vec2(dot(pq2,pq2), s*(v2.x*e2.y-v2.y*e2.x)));
   return -sqrt(d.x)*sign(d.y);
 }
-/* A swept delta, nose at +x, drawn in local units of the hull radius. */
-float sdShipHull(vec2 q, float R){
-  q /= R;
-  vec2 m = vec2(q.x, abs(q.y));
-  float body = sdSegment(m, vec2(-0.62,0.0), vec2(1.05,0.0)) - mix(0.10, 0.34, smoothstep(1.05,-0.62,m.x));
-  float wing = sdTri(m, vec2(0.30,0.03), vec2(-0.78,0.98), vec2(-0.50,0.05)) - 0.05;
-  float tail = sdTri(m, vec2(-0.30,0.02), vec2(-0.95,0.34), vec2(-0.72,0.02)) - 0.04;
-  return min(min(body, wing), tail) * R;
-}
-
 /* =============================== prisms ================================== */
 void prismShadow(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD, float PWH){
 /* ---------------- disc shadow: soft, offset, with contact darkening -------- */
@@ -1407,56 +1398,369 @@ void prismSurface(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD
 
 /* ================================ ships ================================== */
 //#REGION SHIP
+/* ========================= dichroic interceptors ==========================
+   Four single-seat fighters, each finished in a thin dichroic film over dark
+   anodised metal.  The film is a real interference model: thinFilm() is fed a
+   thickness field that follows the hull's own form -- thin over the crown of
+   the fuselage and along the wing spar, pooling in the creases, crowding hard
+   into every polished edge -- so the colour sweeps read as a *coating on a
+   shape* rather than a gradient pasted on a silhouette.
+
+   Identity survives the iridescence because the whole interference gamut is
+   rotated about the achromatic axis so that its modal hue lands exactly on
+   the ship's livery hue (FILM_H0 is the film's own modal hue at FILM_D0).
+   Every ship therefore wears the same physical fringe structure in its own
+   colourway, and no amount of sweep can turn a cyan ship magenta.
+
+   Luminance and hue are authored independently: the film tint is normalised
+   to unit luminance before it is applied, so the sweeps swing hue hard while
+   the ship keeps a stable, readable value -- chroma is nearly free.        */
+
+#define SHIP_LUM vec3(0.2126, 0.7152, 0.0722)
+#define FILM_H0  0.645              // measured modal hue of the film at FILM_D0
+#define FILM_D0  235.0              // nm; ~one fringe order across a hull
+
+float sh_smin(float a, float b, float k){
+  float h = clamp(0.5 + 0.5*(b - a)/k, 0.0, 1.0);
+  return mix(b, a, h) - k*h*(1.0 - h);
+}
+float sh_smax(float a, float b, float k){ return -sh_smin(-a, -b, k); }
+
+/* hue rotation about the grey axis (Rodrigues).  Leaves the achromatic
+   component untouched, so it moves colour without moving brightness.       */
+vec3 sh_hueSpin(vec3 c, float a){
+  vec3 k = vec3(0.5773502692);
+  float ca = cos(a), sa = sin(a);
+  return c*ca + cross(k, c)*sa + k*dot(k, c)*(1.0 - ca);
+}
+
+/* A film sample normalised to unit luminance and rotated onto a target hue.
+   The +0.10 floor is what stops a dark fringe order from exploding when it
+   is divided by its own luminance; it also lets saturation breathe, which
+   is most of what makes a real slick look wet.                            */
+vec3 sh_film(float thick, float cosT, float nf, float hue, float sat){
+  vec3  f  = thinFilm(thick, cosT, nf);
+  float fy = dot(f, SHIP_LUM);
+  vec3  t  = min((f + 0.10)/(fy + 0.10), 4.2);
+  t = max(sh_hueSpin(t, (hue - FILM_H0)*6.2831853), 0.0);
+  t /= max(dot(t, SHIP_LUM), 1e-3);
+  return mix(vec3(1.0), t, sat);
+}
+
+/* Hue wheel in linear light.  The naive triangular ramp has corners that
+   show up as banding in a slow sweep, so it is smoothed.                  */
+vec3 sh_hue2rgb(float h, float sat){
+  vec3 r = clamp(abs(mod(h*6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0);
+  r = r*r*(3.0 - 2.0*r);
+  return mix(vec3(1.0), r, sat);
+}
+
+/* band-limited mottle.  One hull radius is only ~22 px, so the stock 5-octave
+   fbm would run far past Nyquist here; this is three octaves with the finest
+   faded out on pixel size.                                                 */
+float sh_mottle(vec2 p, float pxl){
+  float f3 = 1.0 - smoothstep(0.28, 0.48, 4.1*pxl);
+  return (vnoise(p)*0.60 + vnoise(p*2.03 + 7.7)*0.28 + vnoise(p*4.10 - 3.3)*0.12*f3)
+       / (0.88 + 0.12*f3);
+}
+
+/* ---- planform, in hull radii, nose at +x -------------------------------
+   A long-nosed delta: fine forebody, wings swept 57 degrees off the middle
+   of the fuselage, a straight trailing edge square across the back of the
+   wing, then a tail boom carrying two small fins and the nozzles.  The
+   boom sticking out behind a straight trailing edge is what stops the
+   silhouette collapsing into a four-pointed star at forty pixels.        */
+#define WI_A vec2( 0.60, 0.030)
+#define WI_B vec2(-0.55, 0.780)
+#define WI_C vec2(-0.62, 0.050)
+#define TF_A vec2(-0.66, 0.030)
+#define TF_B vec2(-1.02, 0.215)
+#define TF_C vec2(-0.95, 0.020)
+
+float sh_rad(float x){
+  float t = clamp((x + 0.92)/2.37, 0.0, 1.0);
+  return 0.024 + 0.140*pow(max(sin(PI*pow(t, 0.58)), 0.0), 0.55);
+}
+
+/* signed distance to the airframe, local units */
+float sh_sil(vec2 q){
+  vec2 m = vec2(q.x, abs(q.y));
+  float bx = clamp(m.x, -0.92, 1.45);
+  float body = length(m - vec2(bx, 0.0)) - sh_rad(m.x);
+  float wing = sdTri(m, WI_A, WI_B, WI_C) - 0.045;
+  float tail = sdTri(m, TF_A, TF_B, TF_C) - 0.026;
+  return sh_smin(sh_smin(body, wing, 0.055), tail, 0.026);
+}
+
+/* height above the plan, local units: fuselage barrel, canopy blister, a
+   cambered wing with a raised leading-edge spar and a rolled tip, and the
+   tail fins.                                                              */
+float sh_hgt(vec2 q){
+  vec2  m = vec2(q.x, abs(q.y));
+  float r = sh_rad(m.x);
+  float u = clamp(m.y/(r*1.24), 0.0, 1.0);
+  float h = r*2.05*sqrt(max(0.0, 1.0 - u*u));
+
+  vec2 cq = (m - vec2(0.34, 0.0))/vec2(0.30, 0.098);
+  h += 0.070*exp(-dot(cq, cq));
+
+  float sp   = clamp(m.y/0.80, 0.0, 1.0);
+  float dle  = sdSegment(m, WI_A, WI_B);
+  float wing = 0.010 + 0.070*sp - 0.082*sp*sp + 0.034*exp(-dle*dle*18.0);
+  h = sh_smax(h, wing, 0.045);
+
+  float dt = sdTri(m, TF_A, TF_B, TF_C);
+  h = sh_smax(h, 0.078 - 0.36*max(dt, 0.0), 0.030);
+
+  /* roll the whole form over at the silhouette so the rim turns away from
+     the viewer and the grazing terms have something to bite on */
+  return h * smoothstep(-0.026, 0.100, -sh_sil(q));
+}
+
 void shipDraw(inout vec3 col, vec2 P, float px, int i){
   vec4 S = uShip[i];
-  if (S.w < 0.5) return;                       // destroyed
-  vec4 A = uShipA[i];
-  vec3 liv = uShipC[i].rgb;
-  vec2 q = rot(-S.z) * (P - S.xy);
-  float R = uArena.x*0.0 + 0.021;              // hull radius in world units
-  float d = sdShipHull(q, R);
-  if (d > 0.05) return;
+  if (S.w < 0.5) return;                        // destroyed
+  vec4  A   = uShipA[i];
+  vec3  liv = uShipC[i].rgb;
 
-  /* --- contact shadow on the arena floor --- */
-  float sh = 1.0 - smoothstep(-0.004, 0.030, sdShipHull(rot(-S.z)*(P - S.xy - vec2(0.008,0.012)), R));
-  col *= mix(vec3(1.0), vec3(0.30,0.34,0.44), 0.55*sh);
+  /* ---- colourway trim --------------------------------------------------
+     The four liveries arrive as cyan .52 / magenta .90 / amber .10 /
+     violet .74.  Violet and magenta are only 0.16 of a turn apart, which is
+     inside the arc the interference itself sweeps, so under pressure they
+     start to look like the same ship.  These trims push that pair apart and
+     pull the other two onto cleaner primaries; the film's own sweep then
+     runs blue->violet on one and rose->magenta on the other, and the two
+     never meet.  Violet also carries a little less luminance, which is the
+     second cue that separates them at a glance.                          */
+  float hue0 = uShipC[i].w;
+  float isM  = smoothstep(0.84, 0.88, hue0);
+  float isV  = smoothstep(0.62, 0.66, hue0)*(1.0 - smoothstep(0.80, 0.84, hue0));
+  float isC  = smoothstep(0.36, 0.40, hue0)*(1.0 - smoothstep(0.56, 0.60, hue0));
+  float isA  = 1.0 - smoothstep(0.22, 0.26, hue0);
+  float hue  = hue0 + 0.035*isM - 0.048*isV - 0.014*isC - 0.016*isA;
 
-  float m = 1.0 - smoothstep(-px, px, d);
-  if (m <= 0.001) return;
+  const float R = 0.0245;                       // drawn hull radius
+  mat2  M  = rot(-S.z);
+  vec2  ql = M*(P - S.xy)/R;                    // local, hull radii, y down
+  if (ql.x < -3.1 || ql.x > 2.4 || abs(ql.y) > 2.1) return;
 
-  /* --- oil-shade hull: a thin interference film over dark metal --- */
-  vec2 ql = q / R;
-  float along = clamp(ql.x*0.5 + 0.5, 0.0, 1.0);
-  float across = abs(ql.y);
-  float dome = sqrt(max(0.0, 1.0 - across*across*0.55));
-  vec3 n = normalize(vec3(ql.y*0.45, -0.25 + along*0.35, dome*1.25));
-  vec3 V = vec3(0.0,0.0,1.0);
-  vec3 L = normalize(vec3(-0.55,-0.72,0.72));
-  float cosT = clamp(dot(n,V), 0.06, 1.0);
+  float pxl  = px/R;                            // one pixel, local units
+  float seed = fract(hue*17.13 + 0.371)*23.0;
+  float self = (i == uSelf) ? 1.0 : 0.0;
+  float dl   = sh_sil(ql);
+  vec2  kl   = M*normalize(vec2(-0.52, -0.80));  // key light, local screen dir
 
-  float thick = 300.0 + 260.0*along + 180.0*across + 70.0*fbm(ql*2.4);
-  vec3 film = thinFilm(thick, cosT, 1.42);
-  vec3 base = mix(vec3(0.020,0.023,0.030), liv*0.16, 0.55);
-  base += film * (liv*0.55 + 0.25) * 0.42;
+  /* ---------------- contact shadow on the arena floor ------------------- */
+  {
+    float ds = sh_sil(ql - M*vec2(0.009, 0.013)/R);
+    float s0 = 1.0 - smoothstep(-0.15, 1.05, ds);
+    float s1 = 1.0 - smoothstep(-0.05, 0.28, ds);
+    col *= mix(vec3(1.0), vec3(0.22, 0.26, 0.38), 0.34*s0*s0 + 0.30*s1);
+  }
 
-  float spec = pow(max(dot(normalize(L+V), n), 0.0), 34.0);
-  base += vec3(0.75,0.82,0.95)*spec*0.55;
-  base += liv * pow(1.0-cosT, 3.0) * 0.30;      // grazing rim
+  /* ---------------- engine plume ----------------------------------------
+     A short teardrop torch off the tail, white at the throat and livery
+     coloured down the flame.  Its length and heat are the charge read-out:
+     an idle ember at zero, a hard torch at full.                          */
+  if (ql.x < -0.90){
+    float chg  = clamp(A.z, 0.0, 1.0);
+    float t    = -0.90 - ql.x;                           // distance aft
+    float len  = 0.34 + 0.80*chg;
+    float u    = clamp(t/len, 0.0, 1.0);
+    float taper= (1.0 - u)*(1.0 - u);
+    float w    = 0.150 + 0.34*u*(1.0 - 0.5*u);
+    float core = exp(-pow(abs(ql.y)/w, 2.0))*taper;
+    float flick= 0.87 + 0.13*sin(uTime*19.0 + seed*3.1 + t*6.0);
+    float amt  = core*flick*(0.16 + 0.84*chg);
+    col += liv * amt * 0.30;
+    col += vec3(0.72, 0.84, 1.06) * amt * exp(-t*7.0) * 0.20;
+  }
+  /* twin nozzle throats glowing on the tail itself */
+  {
+    float chg = clamp(A.z, 0.0, 1.0);
+    float nz  = exp(-pow((abs(ql.y) - 0.135)/0.080, 2.0))
+              * exp(-pow((ql.x + 0.84)/0.13, 2.0));
+    col += mix(liv, vec3(1.0), 0.40) * nz * (0.09 + 0.50*chg);
+  }
 
-  /* --- engine glow, brighter under thrust --- */
-  float eng = exp(-pow(max(0.0,(-ql.x-0.55))*2.2, 2.0)) * exp(-across*4.0);
-  base += liv * eng * (0.35 + 0.9*A.z) * 1.1;
+  /* ---------------- shield bubble ---------------------------------------
+     A soap-thin refractive shell -- the same interference physics as the
+     hull coating, an order of magnitude thicker, so it shimmers in the
+     ship's own colourway.  Full: an unbroken skin with a bright grazing
+     rim.  Failing: it thins, breaks into drifting plates, then goes.      */
+  {
+    float sv = clamp(A.x, 0.0, 1.0);
+    if (sv > 0.004){
+      float sr  = length(ql*vec2(0.82, 1.14));           // ovoid, along the hull
+      vec2  dir = ql/max(length(ql), 1e-4);
+      float shell = exp(-pow((sr - 1.34)/0.115, 2.0));
+      float brk  = sh_mottle(dir*2.1 + vec2(uTime*0.06, seed), pxl);
+      float gate = smoothstep(1.00 - 1.18*sv, 0.64 - 0.40*sv, 1.0 - brk);
+      float face = 0.28 + 0.72*max(dot(dir, kl), 0.0);
+      float sth  = 430.0 + 300.0*brk + 260.0*(1.0 - face);
+      vec3  stn  = sh_film(sth, 0.72, 1.33, hue, 0.62);
+      float e = shell*gate*sv;
+      col += stn * liv * e * (0.050 + 0.28*face*face);
+      col += vec3(0.60, 0.76, 1.05) * e * pow(face, 3.0) * 0.070;
+      col += liv * smoothstep(1.34, 0.05, sr) * gate * sv * 0.0050;
+    }
+  }
 
-  /* --- shield bubble, fades as it is melted --- */
-  float sr = length(q)/R;
-  float bub = smoothstep(1.9, 1.55, sr) * smoothstep(1.35, 1.6, sr);
-  col += liv * bub * A.x * 0.10;
+  float m = 1.0 - smoothstep(-pxl, pxl, dl);
+  if (m <= 0.002) return;
 
-  /* --- crisp outline; the local player's ship reads brightest --- */
-  float ol = 1.0 - smoothstep(0.0, px*1.7, abs(d));
-  base += mix(vec3(0.30,0.34,0.42), liv*1.4, 0.6) * ol * (i == uSelf ? 1.15 : 0.65);
+  /* ---------------- pseudo-3D form -------------------------------------- */
+  float e  = max(0.030, pxl);
+  float h0 = sh_hgt(ql);
+  float hxp = sh_hgt(ql + vec2(e, 0.0)), hxm = sh_hgt(ql - vec2(e, 0.0));
+  float hyp = sh_hgt(ql + vec2(0.0, e)), hym = sh_hgt(ql - vec2(0.0, e));
+  vec3  n = normalize(vec3(-(hxp - hxm)/(2.0*e)*0.95, -(hyp - hym)/(2.0*e)*0.95, 1.0));
+  float lap = (hxp + hxm + hyp + hym - 4.0*h0)/(e*e);    // >0 in a crease
+
+  vec3 Lw = normalize(vec3(-0.48, -0.62, 0.68));         // key, upper-left
+  vec3 L  = vec3(M*Lw.xy, Lw.z);
+  vec3 Fw = normalize(vec3( 0.55,  0.58, 0.60));         // cool bounce fill
+  vec3 F  = vec3(M*Fw.xy, Fw.z);
+  vec3 V  = vec3(0.0, 0.0, 1.0);
+
+  float ndl  = dot(n, L);
+  float cosT = clamp(dot(n, V), 0.05, 1.0);
+  float ao   = 1.0 - 0.68*clamp(lap*0.0016, 0.0, 1.0);
+  float mott = sh_mottle(ql*1.30 + seed, pxl);
+
+  /* ---------------- luminance field -------------------------------------
+     Authored on its own so nothing the film does can move the value.  A
+     hard key and a weak fill: the lit surfaces have to be able to go five
+     stops above the shadowed ones or the hull will not read as solid.     */
+  float shade = smoothstep(-0.72, 0.96, ndl);
+  float Y = mix(0.0038, 0.1600, shade);
+  Y += 0.0150*pow(max(0.0, dot(n, F)), 1.6);
+
+  /* Two broad sheets of light guided through the coating, crossing at an
+     angle, exactly as the caustic sweeps do on the disc.  They are what
+     turns a tinted triangle into something that looks wet.  Both run at
+     about one cycle across the whole airframe, so neither can alias.     */
+  float mot2 = sh_mottle(ql*0.90 - seed*0.7, pxl);
+  vec2  sax  = M*normalize(vec2( 0.62, -0.78));
+  vec2  sbx  = M*normalize(vec2(-0.34, -0.94));
+  float st   = dot(ql, sax) + 0.22;
+  float s2t  = dot(ql, sbx) - 0.30;
+  float sheet= exp(-st*st*1.05)*(0.45 + 0.95*mott);
+  float shet2= exp(-s2t*s2t*0.62)*(0.40 + 0.95*mot2);
+  Y += 0.0520*sheet*(0.20 + 0.80*shade);
+  Y += 0.0290*shet2*(0.24 + 0.76*shade);
+
+  Y *= ao;
+  Y *= 0.90 + 0.20*mott;
+  Y *= 1.0 - 0.12*isV + 0.05*isC;   // violet runs deeper, cyan a touch brighter
+
+  /* ---------------- the film --------------------------------------------
+     A peaked thickness distribution: most of the skin sits within about a
+     tenth of an order of FILM_D0 -- that is what holds the livery -- while
+     the rim, where the coat crowds against the polished edge, runs out
+     through a whole order and lays rainbow piping on the structure lines. */
+  float din  = max(0.0, -dl);
+  float dle  = sdSegment(vec2(ql.x, abs(ql.y)), WI_A, WI_B);
+  float thick = FILM_D0*(1.0
+      + 0.44*exp(-din*9.5)                        // crowds into every edge
+      - 0.105*clamp(h0/0.24, 0.0, 1.0)            // thin over the crown
+      - 0.085*exp(-dle*dle*52.0)                  // thinnest along the spar
+      + 0.150*ql.x                                // spray wedge, nose to tail
+      + 0.110*abs(ql.y)                           // and outboard along the span
+      + 0.105*(sh_mottle(ql*1.50 + seed*1.7, pxl) - 0.5)*2.0
+      + 0.055*clamp(lap*0.0012, -1.0, 1.0)        // pools in the creases
+      - 0.165*sheet + 0.140*shet2);
+  float cosF = mix(1.0, cosT, 0.42);              // damped angular shift
+
+  /* Read the interference as a chromatic phasor rather than as a colour.
+     ang is where this thickness sits inside its fringe order and chr is how
+     saturated that stop is -- both straight out of thinFilm.  Feeding them
+     into an arc of the hue wheel centred on the livery is what lets the
+     sweep swing sixty degrees of hue and still never leave the ship's own
+     colourway, and never pass through the desaturated khaki stops that a
+     raw interference triplet has to cross.                                */
+  vec3  f   = thinFilm(thick, cosF, 1.34);
+  float fr  = f.r - f.b;
+  float fg  = f.g - 0.5*(f.r + f.b);
+  float ang = atan(fg*1.15, fr) + 2.708;          // 0 at the modal fringe stop
+  float chr = clamp(length(vec2(fr, fg*1.15))*1.35, 0.0, 1.0);
+  float hueF = hue + 0.150*sin(ang) + 0.048*sin(2.0*ang + 0.9);
+  vec3  tint = sh_hue2rgb(hueF, mix(0.58, 1.00, chr));
+  tint /= max(dot(tint, SHIP_LUM), 1e-3);
+  tint = mix(tint, liv/max(dot(liv, SHIP_LUM), 1e-3), 0.12);
+
+  /* every fringe order carries its own brightness, as a reflectance does */
+  Y *= 0.88 + 0.26*chr*(0.5 + 0.5*cos(ang));
+
+  vec3 base = Y*tint;
+  base += liv*0.0070*(0.30 + 0.70*shade);         // livery never leaves the darks
+
+  /* ---------------- canopy: dark glass with a sliver of sky -------------- */
+  {
+    vec2 cq = (ql - vec2(0.34, 0.0))/vec2(0.32, 0.100);
+    float c = exp(-dot(cq, cq)*1.20);
+    base = mix(base, base*vec3(0.34, 0.40, 0.56) + vec3(0.005, 0.008, 0.016), c*0.70);
+    vec2 gq = (ql - vec2(0.44, -0.032))/vec2(0.17, 0.020);
+    base += vec3(0.58, 0.70, 1.00)*exp(-dot(gq, gq))*0.30*c;
+    vec2 g2 = (ql - vec2(0.22, 0.036))/vec2(0.13, 0.016);
+    base += vec3(0.30, 0.40, 0.62)*exp(-dot(g2, g2))*0.10*c;
+  }
+
+  /* ---------------- light on top of the material ------------------------ */
+  vec3  H   = normalize(L + V);
+  float ndh = max(dot(n, H), 0.0);
+  base += vec3(0.22, 0.32, 0.50)*pow(ndh, 10.0)*0.075;
+  base += vec3(0.84, 0.91, 1.10)*pow(ndh, 60.0)*0.55;
+  base += liv*pow(1.0 - cosT, 3.5)*0.085;         // grazing rim keeps the livery
+
+  /* the machined leading edge: the one line that tells you, at 40 px, which
+     way a swept delta is pointing.  Lit only where it faces the key.       */
+  {
+    float le = exp(-pow(dle/(0.022 + pxl*0.8), 2.0));
+    vec2  ln = normalize(vec2(WI_B.y - WI_A.y, -(WI_B.x - WI_A.x)));
+    ln.y *= sign(ql.y + 1e-6);
+    float lf = pow(max(dot(ln, kl), 0.0), 1.3);
+    base += mix(vec3(0.70, 0.78, 1.00), liv, 0.45)*le*lf*0.060;
+  }
+
+  /* ---------------- battle damage --------------------------------------- */
+  float dmg = clamp(1.0 - A.y, 0.0, 1.0);
+  if (dmg > 0.02){
+    float nb = sh_mottle(ql*2.4 + seed*3.3, pxl);
+    float burn = smoothstep(0.90 - 0.30*dmg, 0.99 - 0.24*dmg, nb);
+    base *= mix(1.0, 0.16, burn);                    // the coating is gone
+    base = mix(base, vec3(dot(base, SHIP_LUM))*vec3(0.92, 0.94, 1.02), burn*0.85);
+    float lip = burn*(1.0 - burn)*4.0;
+    float fl  = 0.55 + 0.45*sin(uTime*8.0 + seed*5.0 + nb*9.0);
+    base += vec3(1.00, 0.24, 0.02)*lip*fl*dmg*0.40;  // molten lips around it
+  }
+
+  /* ---------------- polished edges -------------------------------------- */
+  {
+    float ee = pxl*1.25;
+    vec2 g = vec2(sh_sil(ql + vec2(ee, 0.0)) - sh_sil(ql - vec2(ee, 0.0)),
+                  sh_sil(ql + vec2(0.0, ee)) - sh_sil(ql - vec2(0.0, ee)));
+    g = normalize(g + 1e-7);
+    float fac  = max(dot(g, kl), 0.0);
+    float band = exp(-din/(pxl*1.10));
+    float core = exp(-din/(pxl*0.60));
+    base += mix(vec3(0.30, 0.40, 0.66), liv, 0.62)*band*(0.010 + 0.30*pow(fac, 1.6))*(1.0 + 0.8*self);
+    base += vec3(0.94, 0.98, 1.14)*core*pow(fac, 3.0)*(0.22 + 0.55*self);
+    base *= 1.0 - 0.35*band*(1.0 - fac)*(1.0 - fac);   // the away side goes dark
+    base *= 1.0 - 0.28*smoothstep(pxl*1.2, pxl*2.6, din)*(1.0 - smoothstep(pxl*2.6, pxl*5.5, din));
+  }
+
+  /* ---------------- muzzle glow while the laser is live ------------------ */
+  if (A.w > 0.5){
+    vec2 mq = (ql - vec2(1.30, 0.0))/vec2(0.32, 0.15);
+    base += vec3(1.0, 0.96, 0.92)*exp(-dot(mq, mq))*0.9;
+  }
 
   col = mix(col, base, m);
+
+  /* ---------------- the local player ------------------------------------
+     A soft livery halo the eye finds instantly without adding UI chrome.   */
+  if (self > 0.5) col += liv*exp(-max(dl, 0.0)/0.38)*(1.0 - m)*0.030;
 }
 //#ENDREGION SHIP
 

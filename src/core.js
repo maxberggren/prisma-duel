@@ -54,8 +54,9 @@ const RULES = {
   CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
-  HULL_R: 0.021,            // collision/hit radius
-  MUZZLE_CLEAR: 0.033,      // ships keep this clear of prisms, so the muzzle
+  HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
+                            // hull, so a visible wingtip graze actually registers
+  MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
   COLLIDE_DMG: 26,
 
