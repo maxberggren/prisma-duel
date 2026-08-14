@@ -32,7 +32,6 @@ function mk(tag, attrs) {
 const gEnvelope = mk('path', { fill: 'rgba(127,216,255,.055)', stroke: 'rgba(127,216,255,.20)', 'stroke-width': 1 });
 const gTrackBk = mk('path', { fill: 'none', stroke: 'rgba(0,0,0,.55)', 'stroke-width': 4.5, 'stroke-linecap': 'round' });
 const gTrack = mk('path', { fill: 'none', stroke: '#7fd8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
-const gGhosts = [];
 const handle = document.createElement('button');
 handle.className = 'hnd';
 handle.type = 'button';
@@ -318,7 +317,6 @@ function startResolve(moves) {
 }
 
 /** Advance the resolution animation; damage is integrated on fixed substeps. */
-let lastDamageSub = 0;
 function stepResolve(dt) {
   const S = G.ctx.substeps;
   const perSec = S / RULES.TURN_SECONDS;
