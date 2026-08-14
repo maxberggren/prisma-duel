@@ -1,0 +1,15 @@
+{
+  "name": "lazer-net",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Matchmaking + WebRTC signalling server for the lazer turn-based multiplayer game. Signalling only -- all gameplay traffic is peer-to-peer.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test-signalling.js && node test-headless.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

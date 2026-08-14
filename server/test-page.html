@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>lazer net harness</title></head>
+<body>
+<pre id="out">net test harness</pre>
+<script src="/__net/net.js"></script>
+<script>
+// Headless test harness. Records every Net event so the driver can assert on
+// it from Node via CDP. Contains no game logic.
+window.H = (function () {
+  var ev = { roster: [], move: [], resolve: [], status: [], chat: [] };
+  ['roster', 'move', 'resolve', 'status', 'chat'].forEach(function (k) {
+    Net.on(k, function (a) { ev[k].push({ at: Date.now(), a: a }); });
+  });
+  return {
+    ev: ev,
+    connect: function (url, room, name) {
+      return Net.connect({ url: url, room: room, name: name });
+    },
+    events: function (k) { return ev[k]; },
+    clear: function () { Object.keys(ev).forEach(function (k) { ev[k] = []; }); },
+    // full mesh check: every roster peer has an open channel
+    meshReady: function () {
+      var ps = Net.peers();
+      return ps.length > 0 && ps.every(function (p) { return p.connected; });
+    },
+    snapshot: function () {
+      return {
+        selfId: Net.selfId(), room: Net.room, arbiter: Net.arbiterId(),
+        isArbiter: Net.isArbiter(), peers: Net.peers(), stats: Net.stats(),
+        moves: ev.move.map(function (e) { return e.a; }),
+        resolves: ev.resolve.map(function (e) { return e.a; }),
+        chats: ev.chat.map(function (e) { return e.a; }),
+        rosterLen: ev.roster.length ? ev.roster[ev.roster.length - 1].a.length : 0,
+        lastStatus: ev.status.length ? ev.status[ev.status.length - 1].a : null
+      };
+    }
+  };
+})();
+</script>
+</body>
+</html>

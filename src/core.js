@@ -51,6 +51,8 @@ const RULES = {
   FIRE_COST: 1,
 
   HULL_R: 0.021,            // collision/hit radius
+  MUZZLE_CLEAR: 0.033,      // ships keep this clear of prisms, so the muzzle
+                            // is never inside glass (see MUZZLE in the host)
   COLLIDE_DMG: 26,
 };
 
@@ -68,14 +70,14 @@ function mulberry32(seed) {
 }
 
 /* --------------------------------------------------------------- the arena */
-function makeArena(seed) {
+function makeArena(seed, spawnPoints) {
   const rnd = mulberry32(seed);
   const prisms = [];
   const n = 3;
   for (let i = 0; i < n; i++) {
     // spread them across the middle so they matter to most sight lines
     const t = (i + 0.5) / n;
-    prisms.push({
+    const cand = {
       x: RULES.ARENA_W * (0.22 + 0.56 * t) + (rnd() - 0.5) * 0.10,
       y: RULES.ARENA_H * (0.30 + 0.40 * rnd()),
       r: 0.115 + rnd() * 0.075,
@@ -83,10 +85,70 @@ function makeArena(seed) {
       whalf: 0.55 + rnd() * 0.55,
       ior: 1.34 + rnd() * 0.10,
       disp: 0.045 + rnd() * 0.030,
-      spin: (rnd() - 0.5) * 0.06,     // radians per turn; slow, so plans hold
-    });
+      /* Static. A rotating prism would make the previewed bank shot a lie —
+         and it could sweep over a stationary ship, putting a hull inside glass. */
+      spin: 0,
+    };
+    /* Nudge the prism clear of every spawn point. A ship that began inside a
+       prism would fire from a muzzle buried in glass, and the trapped light
+       would shred its own shield. */
+    if (spawnPoints) {
+      for (let guard = 0; guard < 24; guard++) {
+        let worst = null, worstD = Infinity;
+        for (const sp of spawnPoints) {
+          const d = prismSD(cand, sp.x, sp.y);
+          if (d < worstD) { worstD = d; worst = sp; }
+        }
+        if (worstD > RULES.HULL_R * 3.5) break;
+        const ax = cand.x - worst.x, ay = cand.y - worst.y;
+        const al = Math.hypot(ax, ay) || 1;
+        cand.x += (ax / al) * 0.035;
+        cand.y += (ay / al) * 0.035;
+        cand.x = clamp(cand.x, cand.r * 0.5, RULES.ARENA_W - cand.r * 0.5);
+        cand.y = clamp(cand.y, cand.r * 0.5, RULES.ARENA_H - cand.r * 0.5);
+      }
+    }
+    prisms.push(cand);
   }
   return { prisms, w: RULES.ARENA_W, h: RULES.ARENA_H };
+}
+
+/* Signed distance to a prism solid (circle minus wedge), matching the shader.
+   Ships collide with prisms, so a hull can never sit inside glass — which would
+   otherwise put a firing ship's muzzle inside a refracting medium. */
+function sdSector2(qx, qy, wh) {
+  const ay = Math.abs(qy);
+  const ex = Math.cos(wh), ey = Math.sin(wh);
+  const h = Math.max(qx * ex + ay * ey, 0);
+  const d = Math.hypot(qx - ex * h, ay - ey * h);
+  return Math.atan2(ay, qx) <= wh ? -d : d;
+}
+function prismSD(P, x, y) {
+  const qx = x - P.x, qy = y - P.y;
+  const c = Math.cos(-P.wdir), sn = Math.sin(-P.wdir);
+  return Math.max(Math.hypot(qx, qy) - P.r,
+                  -sdSector2(qx * c - qy * sn, qx * sn + qy * c, P.whalf));
+}
+/** Push a point out of any prism it has entered. Returns the corrected point.
+    The clearance is the MUZZLE offset, not the hull radius, so a ship nosed up
+    against a prism still fires from open space rather than from inside glass. */
+function pushOutOfPrisms(prisms, x, y, R) {
+  for (let it = 0; it < 8; it++) {
+    let moved = false;
+    for (const P of prisms) {
+      const d = prismSD(P, x, y);
+      if (d >= R) continue;
+      const e = 1e-4;
+      let gx = (prismSD(P, x + e, y) - prismSD(P, x - e, y)) / (2 * e);
+      let gy = (prismSD(P, x, y + e) - prismSD(P, x, y - e)) / (2 * e);
+      const gl = Math.hypot(gx, gy) || 1;
+      gx /= gl; gy /= gl;
+      x += gx * (R - d); y += gy * (R - d);
+      moved = true;
+    }
+    if (!moved) break;
+  }
+  return { x, y };
 }
 
 /* ---------------------------------------------------------------- the ship */
@@ -115,11 +177,12 @@ function makeShip(id, name, i, n) {
 
 function makeState(players, seed) {
   const n = players.length;
+  const ships = players.map((p, i) => makeShip(p.id, p.name, i, n));
   return {
     seed,
     turn: 0,
-    arena: makeArena(seed),
-    ships: players.map((p, i) => makeShip(p.id, p.name, i, n)),
+    arena: makeArena(seed, ships.map(s => ({ x: s.x, y: s.y }))),
+    ships,
     log: [],
   };
 }
@@ -155,10 +218,37 @@ function legaliseMove(ship, move) {
    spectral ray tracer. Damage is integrated as power x milliseconds, which is
    what makes dwell time the currency of the game.
    ========================================================================== */
+/**
+ * Precompute a whole turn's trajectory. Every peer walks the same fixed number
+ * of substeps in the same order, so the path is bit-identical everywhere and
+ * reading a substep back is O(1). Bounces off the mirrored arena walls are
+ * baked in here. The planning UI draws the very same path, so what a player is
+ * shown is exactly what they will fly.
+ */
+function integratePath(ship, m, arenaW, arenaH, prisms) {
+  const S = RULES.SUBSTEPS, dt = 1 / S, R = RULES.HULL_R;
+  const path = new Array(S + 1);
+  let x = ship.x, y = ship.y;
+  const dh = angDelta(ship.heading, m.heading);
+  for (let k = 0; k <= S; k++) {
+    const t = k / S;
+    const hk = ship.heading + dh * t;
+    const sk = lerp(ship.speed, m.speed, t);
+    path[k] = { x, y, heading: hk, speed: sk };
+    if (k < S) {
+      x += Math.cos(hk) * sk * dt;
+      y += Math.sin(hk) * sk * dt;
+      if (x < R) x = R + (R - x);
+      if (x > arenaW - R) x = (arenaW - R) - (x - (arenaW - R));
+      if (y < R) y = R + (R - y);
+      if (y > arenaH - R) y = (arenaH - R) - (y - (arenaH - R));
+      if (prisms && prisms.length) { const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y; }
+    }
+  }
+  return path;
+}
+
 function beginTurn(state, movesById) {
-  const S = RULES.SUBSTEPS;
-  const dt = 1 / S;
-  const R = RULES.HULL_R;
   const plan = [];
 
   for (const ship of state.ships) {
@@ -172,30 +262,10 @@ function beginTurn(state, movesById) {
     ship.dealtDamage = 0;
     if (m.fire) ship.charge -= RULES.FIRE_COST;
 
-    /* Precompute the whole trajectory once. Every peer walks the same fixed
-       number of substeps in the same order, so the path is bit-identical
-       everywhere; reading it back is then O(1) per substep. Bounces off the
-       mirrored arena walls are baked in here. */
-    const path = new Array(S + 1);
-    let x = ship.x, y = ship.y;
-    const dh = angDelta(ship.heading, m.heading);
-    for (let k = 0; k <= S; k++) {
-      const t = k / S;
-      const hk = ship.heading + dh * t;
-      const sk = lerp(ship.speed, m.speed, t);
-      path[k] = { x, y, heading: hk, speed: sk };
-      if (k < S) {
-        x += Math.cos(hk) * sk * dt;
-        y += Math.sin(hk) * sk * dt;
-        if (x < R) { x = R + (R - x); }
-        if (x > state.arena.w - R) { x = (state.arena.w - R) - (x - (state.arena.w - R)); }
-        if (y < R) { y = R + (R - y); }
-        if (y > state.arena.h - R) { y = (state.arena.h - R) - (y - (state.arena.h - R)); }
-      }
-    }
+    const path = integratePath(ship, m, state.arena.w, state.arena.h, state.arena.prisms);
     plan.push({ ship, path, fire: m.fire, thrust: m.thrust, hEnd: m.heading, sEnd: m.speed });
   }
-  return { plan, sub: 0, substeps: S, done: false, collided: new Set() };
+  return { plan, sub: 0, substeps: RULES.SUBSTEPS, done: false, collided: new Set() };
 }
 
 /** Advance the ships to substep `sub` (0..SUBSTEPS) by reading the plan. */
@@ -286,6 +356,7 @@ function stateHash(state) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { RULES, TAU, clamp, lerp, angDelta, mulberry32, makeArena, makeShip,
-                     makeState, legaliseMove, maxSpeedFor, turnRateFor, beginTurn,
+                     makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, beginTurn,
+                     prismSD, pushOutOfPrisms,
                      applySubstep, applyHits, applyCollisions, endTurn, stateHash };
 }

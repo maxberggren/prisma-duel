@@ -1,0 +1,73 @@
+<div class="ui" id="ui">
+
+  <!-- fleet roster: one card per fighter -->
+  <div class="roster" id="roster" role="list" aria-label="Fighters"></div>
+
+  <!-- orders for the coming turn -->
+  <section class="orders" id="orders" aria-label="Orders">
+    <header>
+      <span class="t">ORDERS</span>
+      <span class="clock" id="clock" role="timer" aria-live="off">--</span>
+    </header>
+    <div class="obody">
+
+      <div class="row">
+        <div class="rhead"><label for="oThr">POWER SPLIT</label><b id="vThr">50 / 50</b></div>
+        <input id="oThr" type="range" min="0" max="1" step="0.01" value="0.5"
+               aria-describedby="dThr">
+        <div class="split"><span>RECHARGE</span><span>THRUST</span></div>
+        <span id="dThr" class="sr" hidden>Thrust buys speed and agility; the remainder recharges the laser.</span>
+      </div>
+
+      <div class="row">
+        <div class="rhead"><label for="oSpd">THROTTLE</label><b id="vSpd">--</b></div>
+        <input id="oSpd" type="range" min="0" max="1" step="0.01" value="0.5" aria-describedby="dSpd">
+        <span id="dSpd" class="sr" hidden>Commanded speed for the coming turn, limited by your power split.</span>
+      </div>
+
+      <button class="btn fire" id="oFire" type="button" aria-pressed="false">
+        <span id="fireLbl">ARM LASER</span><span class="kbd">F</span>
+      </button>
+
+      <button class="btn commit" id="oCommit" type="button">
+        <span id="commitLbl">COMMIT ORDERS</span><span class="kbd">↵</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- course handle and predicted track -->
+  <div class="giz" id="giz"></div>
+
+  <div class="banner" id="banner" style="opacity:0"><h2 id="bannerT"></h2><p id="bannerS"></p></div>
+
+  <div class="hint" id="hint">
+    <b>Drag</b> the handle to set your course · <b>F</b> arms the laser · <b>Enter</b> commits
+  </div>
+
+  <!-- lobby -->
+  <div class="veil" id="lobby">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lobbyT">
+      <h1 id="lobbyT">Prisma</h1>
+      <p class="sub">Turn-based laser duelling</p>
+
+      <div class="fld">
+        <label for="lName">CALLSIGN</label>
+        <input id="lName" type="text" maxlength="12" value="PILOT" autocomplete="off" spellcheck="false">
+      </div>
+
+      <button class="btn" id="bSolo" type="button">PRACTICE — 3 BOTS</button>
+
+      <div class="or">MULTIPLAYER</div>
+
+      <div class="fld">
+        <label for="lRoom">ROOM CODE <span style="color:#5c6577">— blank to matchmake</span></label>
+        <input id="lRoom" type="text" maxlength="6" placeholder="ABCD" autocomplete="off"
+               spellcheck="false" style="text-transform:uppercase">
+      </div>
+      <button class="btn" id="bJoin" type="button">JOIN ROOM</button>
+
+      <div class="status" id="lStatus"></div>
+    </div>
+  </div>
+
+</div>
