@@ -54,6 +54,8 @@ function legalNow() {
 function syncOrderUI() {
   const sh = selfShip();
   if (!sh) return;
+  // the rematch screen replaces the orders panel, detaching these controls
+  if (!oCommit.isConnected) return;
   if (!sh.alive) {
     // a destroyed player keeps watching; the turn no longer waits on them
     $('commitLbl').textContent = 'DESTROYED — SPECTATING';
@@ -235,35 +237,60 @@ function commitOrders() {
   maybeResolve();
 }
 
-/** Bots commit as soon as the player does, so solo play never waits. */
+/** Bots commit as soon as the player does, so solo play never waits.
+    They are deliberately not perfect: they lead the target, respect the
+    thrust-versus-recharge tradeoff, keep off the closing walls, and only take
+    the shot when the geometry is actually there. */
 function botOrders(sh) {
   const foes = G.state.ships.filter(s => s.alive && s.idx !== sh.idx);
   if (!foes.length) return { heading: sh.heading, speed: sh.speed, thrust: 0.5, fire: false };
-  let best = foes[0], bd = 1e9;
+
+  // pick the softest reachable target, not merely the closest
+  let best = foes[0], bestScore = -1e9;
   for (const f of foes) {
     const d = Math.hypot(f.x - sh.x, f.y - sh.y);
-    if (d < bd) { bd = d; best = f; }
+    const score = -d * 2.2 - (f.shield + f.hull) * 0.004;
+    if (score > bestScore) { bestScore = score; best = f; }
   }
-  // lead the target a little, and prefer recharging when far away
-  const lead = clamp(bd * 2.2, 0, 1);
-  const tx = best.x + Math.cos(best.heading) * best.speed * lead;
-  const ty = best.y + Math.sin(best.heading) * best.speed * lead;
+  const dist = Math.hypot(best.x - sh.x, best.y - sh.y);
+
+  // lead it: where will it be when the beam gets there?
+  const lead = 0.85;
+  let tx = best.x + Math.cos(best.heading) * best.speed * lead;
+  let ty = best.y + Math.sin(best.heading) * best.speed * lead;
+
+  // stay off the closing walls — being pinned against one is how bots die
+  const IN = (G.state && G.state.inset) || 0;
+  const m = 0.10;
+  const cx = arena.w * 0.5, cy = arena.h * 0.5;
+  const nearWall = Math.min(sh.x - IN, arena.w - IN - sh.x, sh.y - IN, arena.h - IN - sh.y);
+  if (nearWall < m) {
+    const w = (m - nearWall) / m;
+    tx = lerp(tx, cx, w * 0.85);
+    ty = lerp(ty, cy, w * 0.85);
+  }
+
   const want = Math.atan2(ty - sh.y, tx - sh.x);
   const off = Math.abs(angDelta(sh.heading, want));
-  const thrust = bd > 0.55 ? 0.85 : (off > 0.6 ? 0.25 : 0.45);
-  return {
-    heading: want,
-    speed: bd > 0.5 ? RULES.SPEED_MAX : RULES.SPEED_MAX * 0.55,
-    thrust,
-    fire: sh.charge >= 1 && off < 0.42 && bd < 0.95,
-  };
+  const charged = sh.charge >= RULES.FIRE_COST - 1e-9;
+
+  /* The tradeoff, played honestly: burn thrust to close or to escape a wall,
+     throttle back to reload when out of position. */
+  let thrust;
+  if (nearWall < m) thrust = 0.9;
+  else if (!charged) thrust = off > 0.7 ? 0.55 : 0.15;   // reload while lining up
+  else if (dist > 0.6) thrust = 0.85;
+  else thrust = off > 0.5 ? 0.45 : 0.3;
+
+  const speed = nearWall < m ? RULES.SPEED_MAX
+              : dist > 0.5 ? RULES.SPEED_MAX * 0.85
+              : RULES.SPEED_MAX * 0.5;
+
+  // only shoot when the nose will actually be on them
+  const fire = charged && off < 0.38 && dist < 1.05;
+  return { heading: want, speed, thrust, fire };
 }
 
-/* Everyone has orders? Then the turn can run.
-   Networked, only the ARBITER may declare a turn, and every client — including
-   the arbiter — starts the turn from the resulting `resolve` event. That single
-   code path is what stops a client who commits last from resolving locally with
-   a different move set than the one the arbiter filled in on timeout. */
 function maybeResolve() {
   if (G.phase !== 'plan') return;
   for (const sh of G.state.ships) {
