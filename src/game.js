@@ -54,6 +54,13 @@ function legalNow() {
 function syncOrderUI() {
   const sh = selfShip();
   if (!sh) return;
+  if (!sh.alive) {
+    // a destroyed player keeps watching; the turn no longer waits on them
+    $('commitLbl').textContent = 'DESTROYED — SPECTATING';
+    oCommit.disabled = oFire.disabled = oThr.disabled = oSpd.disabled = true;
+    oCommit.classList.remove('done');
+    return;
+  }
   const thr = G.aim.thrust;
   oThr.value = thr; oThr.style.setProperty('--p', thr);
   $('vThr').textContent = `${Math.round((1 - thr) * 100)} / ${Math.round(thr * 100)}`;
@@ -135,7 +142,7 @@ function drawGizmo() {
   gEnvelope.setAttribute('d', d + 'Z');
 
   // the predicted track, from the very same integrator the sim uses
-  const path = integratePath(sh, m, arena.w, arena.h, arena.prisms);
+  const path = integratePath(sh, m, arena.w, arena.h, arena.prisms, (G.state && G.state.inset) || 0);
   let t = '';
   for (let k = 0; k <= RULES.SUBSTEPS; k += 4) {
     const p = w2s(path[k].x, path[k].y);
@@ -159,7 +166,7 @@ function addPreviewBeam() {
   const sh = selfShip();
   if (!sh || !sh.alive || !G.aim.fire) return;
   const m = legalNow();
-  const path = integratePath(sh, m, arena.w, arena.h, arena.prisms);
+  const path = integratePath(sh, m, arena.w, arena.h, arena.prisms, (G.state && G.state.inset) || 0);
   const N = 40;
   const pw = BEAM_POWER * 0.55 * 1.15 / N;
   for (const frac of [0.0, 0.5, 1.0]) {
@@ -322,7 +329,7 @@ function stepResolve(dt) {
       banner(r.winner ? (r.winner.idx === G.selfIdx ? 'VICTORY' : 'DEFEATED')
                       : 'MUTUAL DESTRUCTION',
              r.winner ? esc(r.winner.name) + ' HOLDS THE FIELD' : 'NO SURVIVORS');
-      $('orders').style.display = 'none';
+      showRematch();
     } else {
       beginPlan();
     }
@@ -358,6 +365,16 @@ function banner(t, s) {
   $('bannerT').textContent = t; $('bannerS').textContent = s;
   $('bannerT').style.fontSize = '';
   $('banner').style.opacity = t ? 1 : 0;
+}
+
+/** Offer a rematch once the field is settled. */
+function showRematch() {
+  const body = document.querySelector('.orders .obody');
+  body.innerHTML = '';
+  const b = document.createElement('button');
+  b.className = 'btn commit'; b.type = 'button'; b.textContent = 'REMATCH';
+  b.addEventListener('click', () => location.reload());
+  body.appendChild(b);
 }
 
 /* ------------------------------------------------------------- the clock */
@@ -549,3 +566,9 @@ function gameFrame(dt) {
 
 renderRoster();
 syncOrderUI();
+
+/* ?solo=1 drops straight into a practice match — used by the render harness
+   and handy for showing the game without clicking through the lobby. */
+if (new URLSearchParams(location.search).has('solo')) {
+  requestAnimationFrame(() => $('bSolo').click());
+}

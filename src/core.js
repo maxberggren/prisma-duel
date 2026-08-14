@@ -32,21 +32,25 @@ const RULES = {
   TURN_SECONDS: 4.0,        // real seconds a resolution animation takes
   PLAN_SECONDS: 25,         // planning window before the arbiter forces the turn
 
-  SPEED_MAX: 0.085,         // world units per turn at full thrust
-  SPEED_MIN: 0.010,         // ships are aircraft: they cannot stop
-  ACCEL: 0.030,             // max change in commanded speed per turn
+  SPEED_MAX: 0.215,         // world units per turn at full thrust
+                            // (the arena is 1.6 wide, so ~7 turns to cross)
+  SPEED_MIN: 0.045,         // ships are aircraft: they cannot stop
+  ACCEL: 0.075,             // max change in commanded speed per turn
   TURN_RATE: 1.15,          // radians per turn at full thrust, low speed
   TURN_RATE_SPEED_PENALTY: 0.55,  // fraction of agility lost at max speed
 
   SHIELD_MAX: 100,
   HULL_MAX: 100,
-  SHIELD_REGEN: 6,          // per turn, only while not firing
+  SHIELD_REGEN: 4,          // per turn, only while not firing
+  SHIELD_REGEN_CAP: 0.7,    // ...and only back up to this fraction, so damage
+                            // accumulates over a match instead of washing out
   /* Damage is per millisecond of dwell, which is what makes a graze cheap and
      a sustained lock lethal. One turn is TURN_SECONDS*1000 ms of exposure at
      most, so a perfect full-turn lock is fatal and a clip costs a few points. */
   DPS_MS: 0.052,
 
   CHARGE_MAX: 1,
+  CHARGE_START: 0.55,       // nobody opens with an alpha strike
   CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
@@ -54,6 +58,13 @@ const RULES = {
   MUZZLE_CLEAR: 0.033,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
   COLLIDE_DMG: 26,
+
+  /* The walls close in. Without it two cautious pilots can circle forever —
+     measured: a bot duel stalemated for 85 turns with both shields pinned at
+     full. The mirrors closing also keeps bank shots live as space runs out. */
+  RING_START: 7,            // turns of open space before the walls move
+  RING_RATE: 0.016,         // world units of inset per turn
+  RING_MAX: 0.30,
 };
 
 /* ------------------------------------------------------------ seeded PRNG
@@ -80,7 +91,7 @@ function makeArena(seed, spawnPoints) {
     const cand = {
       x: RULES.ARENA_W * (0.22 + 0.56 * t) + (rnd() - 0.5) * 0.10,
       y: RULES.ARENA_H * (0.30 + 0.40 * rnd()),
-      r: 0.115 + rnd() * 0.075,
+      r: 0.085 + rnd() * 0.062,
       wdir: rnd() * TAU,
       whalf: 0.55 + rnd() * 0.55,
       ior: 1.34 + rnd() * 0.10,
@@ -165,7 +176,7 @@ function makeShip(id, name, i, n) {
     speed: RULES.SPEED_MAX * 0.45,
     shield: RULES.SHIELD_MAX,
     hull: RULES.HULL_MAX,
-    charge: RULES.CHARGE_MAX,
+    charge: RULES.CHARGE_START,
     alive: true,
     // last committed move, reused when a player times out
     move: { heading: a + Math.PI, speed: RULES.SPEED_MAX * 0.45, fire: false, thrust: 0.5 },
@@ -181,10 +192,17 @@ function makeState(players, seed) {
   return {
     seed,
     turn: 0,
+    inset: 0,
     arena: makeArena(seed, ships.map(s => ({ x: s.x, y: s.y }))),
     ships,
     log: [],
   };
+}
+
+/** How far the mirrored walls have closed in by a given turn. Pure function of
+    the turn number, so every peer agrees without exchanging anything. */
+function arenaInset(turn) {
+  return clamp((turn - RULES.RING_START) * RULES.RING_RATE, 0, RULES.RING_MAX);
 }
 
 /* ------------------------------------------------- per-ship derived limits */
@@ -225,8 +243,9 @@ function legaliseMove(ship, move) {
  * baked in here. The planning UI draws the very same path, so what a player is
  * shown is exactly what they will fly.
  */
-function integratePath(ship, m, arenaW, arenaH, prisms) {
+function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
   const S = RULES.SUBSTEPS, dt = 1 / S, R = RULES.HULL_R;
+  const IN = inset || 0;
   const path = new Array(S + 1);
   let x = ship.x, y = ship.y;
   const dh = angDelta(ship.heading, m.heading);
@@ -238,10 +257,13 @@ function integratePath(ship, m, arenaW, arenaH, prisms) {
     if (k < S) {
       x += Math.cos(hk) * sk * dt;
       y += Math.sin(hk) * sk * dt;
-      if (x < R) x = R + (R - x);
-      if (x > arenaW - R) x = (arenaW - R) - (x - (arenaW - R));
-      if (y < R) y = R + (R - y);
-      if (y > arenaH - R) y = (arenaH - R) - (y - (arenaH - R));
+      const lo = R + IN, hiX = arenaW - R - IN, hiY = arenaH - R - IN;
+      if (x < lo) x = lo + (lo - x);
+      if (x > hiX) x = hiX - (x - hiX);
+      if (y < lo) y = lo + (lo - y);
+      if (y > hiY) y = hiY - (y - hiY);
+      x = clamp(x, lo, Math.max(lo, hiX));
+      y = clamp(y, lo, Math.max(lo, hiY));
       if (prisms && prisms.length) { const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y; }
     }
   }
@@ -262,7 +284,7 @@ function beginTurn(state, movesById) {
     ship.dealtDamage = 0;
     if (m.fire) ship.charge -= RULES.FIRE_COST;
 
-    const path = integratePath(ship, m, state.arena.w, state.arena.h, state.arena.prisms);
+    const path = integratePath(ship, m, state.arena.w, state.arena.h, state.arena.prisms, arenaInset(state.turn));
     plan.push({ ship, path, fire: m.fire, thrust: m.thrust, hEnd: m.heading, sEnd: m.speed });
   }
   return { plan, sub: 0, substeps: RULES.SUBSTEPS, done: false, collided: new Set() };
@@ -327,11 +349,14 @@ function applyCollisions(state, turnCtx) {
 function endTurn(state) {
   for (const sh of state.ships) {
     if (!sh.alive) continue;
-    if (!sh.firedThisTurn) sh.shield = Math.min(RULES.SHIELD_MAX, sh.shield + RULES.SHIELD_REGEN);
+    if (!sh.firedThisTurn)
+      sh.shield = Math.min(RULES.SHIELD_MAX * RULES.SHIELD_REGEN_CAP,
+                           sh.shield + RULES.SHIELD_REGEN);
     const thrust = clamp(sh.move.thrust, 0, 1);
     sh.charge = Math.min(RULES.CHARGE_MAX, sh.charge + RULES.CHARGE_RATE * (1 - thrust));
   }
   state.turn++;
+  state.inset = arenaInset(state.turn);
   const alive = state.ships.filter(s => s.alive);
   return alive.length <= 1 ? { over: true, winner: alive[0] || null } : { over: false };
 }
@@ -356,7 +381,7 @@ function stateHash(state) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { RULES, TAU, clamp, lerp, angDelta, mulberry32, makeArena, makeShip,
-                     makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, beginTurn,
+                     makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, arenaInset, beginTurn,
                      prismSD, pushOutOfPrisms,
                      applySubstep, applyHits, applyCollisions, endTurn, stateHash };
 }
