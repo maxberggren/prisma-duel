@@ -1,0 +1,2608 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>PRISMA — Spectral Laser Simulator</title>
+<style>
+/*#REGION STYLE*/
+  /* ================================================================== tokens */
+  :root{
+    --ink:#e9edf6;
+    --dim:#96a0b4;
+    --mut:#606a7e;
+    --line:rgba(255,255,255,.075);
+    --line2:rgba(255,255,255,.14);
+    --accent:#7fd8ff;
+    --focus:rgba(127,216,255,.50);
+    --sans:ui-sans-serif,-apple-system,"Segoe UI",Inter,Roboto,Helvetica,Arial,sans-serif;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --pad:15px;
+    --dur:.18s;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:#07080b;overflow:hidden}
+  /* font-size:0 on <body> keeps any stray text node out of the artwork; every
+     visible thing lives inside .ui and re-declares its own type. */
+  body{font-size:0;line-height:0;-webkit-font-smoothing:antialiased;touch-action:none;color:var(--ink)}
+  canvas{position:fixed;inset:0;display:block;width:100%;height:100%;cursor:default}
+
+  /* ================================================================= overlay */
+  .ui{
+    position:fixed;inset:0;pointer-events:none;
+    font:400 13px/1.45 var(--sans);
+    opacity:1;visibility:visible;
+    transition:opacity .3s ease,visibility 0s linear 0s;
+  }
+  .ui.hidden{opacity:0;visibility:hidden;transition:opacity .3s ease,visibility 0s linear .3s}
+
+  /* ================================================================== panel  */
+  .panel{
+    position:absolute;top:16px;right:16px;
+    width:clamp(240px,278px,calc(100vw - 32px));
+    pointer-events:auto;
+    background:linear-gradient(178deg,rgba(19,23,31,.84),rgba(9,11,16,.90));
+    border:1px solid rgba(255,255,255,.072);
+    border-radius:13px;
+    backdrop-filter:blur(24px) saturate(125%);
+    -webkit-backdrop-filter:blur(24px) saturate(125%);
+    box-shadow:
+      0 32px 70px -24px rgba(0,0,0,.9),
+      0 4px 14px -6px rgba(0,0,0,.6);
+    isolation:isolate;
+  }
+  .panel::before{
+    content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.065),inset 0 0 0 1px rgba(255,255,255,.02);
+  }
+
+  /* ---- header ---- */
+  .phead{
+    display:flex;align-items:center;gap:9px;
+    height:42px;padding:0 9px 0 var(--pad);
+    border-bottom:1px solid var(--line);
+  }
+  .dot{
+    flex:none;width:6px;height:6px;border-radius:50%;background:var(--accent);
+    box-shadow:0 0 9px 1px rgba(127,216,255,.75);
+  }
+  .title{
+    margin:0;font:600 10.5px/1 var(--sans);letter-spacing:.24em;text-transform:uppercase;
+    color:#dde5f3;
+  }
+  .sub{
+    margin-left:auto;font:500 8.5px/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;
+    color:var(--mut);
+  }
+  .chev{
+    flex:none;width:24px;height:24px;display:grid;place-items:center;
+    padding:0;border:0;background:none;color:#8d97ab;border-radius:6px;cursor:pointer;
+    transition:background var(--dur),color var(--dur);
+  }
+  .chev svg{width:11px;height:11px;fill:none;stroke:currentColor;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round;transition:transform .26s cubic-bezier(.3,.8,.3,1)}
+  .chev:hover{background:rgba(255,255,255,.07);color:#dbe4f2}
+  .panel.col .chev svg{transform:rotate(-90deg)}
+  .panel.col{border-radius:13px}
+
+  /* ---- body ---- */
+  .body{
+    padding:3px var(--pad) 14px;
+    max-height:calc(100vh - 90px);
+    overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.14) transparent;
+  }
+  .panel.col .body{display:none}
+  .body::-webkit-scrollbar{width:9px}
+  .body::-webkit-scrollbar-track{background:transparent}
+  .body::-webkit-scrollbar-thumb{background:rgba(255,255,255,.13);border-radius:9px;border:3px solid transparent;background-clip:content-box}
+  .body::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24);background-clip:content-box}
+
+  /* ---- group header ---- */
+  .grp{
+    display:flex;align-items:center;gap:10px;
+    margin:15px 0 9px;
+    font:600 9px/1 var(--sans);letter-spacing:.22em;text-transform:uppercase;color:#69738a;
+    white-space:nowrap;
+  }
+  .grp:first-child{margin-top:13px}
+  .grp .rule{flex:1 1 auto;height:1px;background:linear-gradient(90deg,rgba(255,255,255,.10),rgba(255,255,255,.01))}
+  .gact{
+    flex:none;font:500 9.5px/1 var(--sans);letter-spacing:.10em;text-transform:uppercase;
+    color:#78839a;background:none;border:0;padding:3px 0 3px 4px;cursor:pointer;
+    transition:color var(--dur);
+  }
+  .gact:hover{color:#dce6f5}
+
+  /* ---- control row ---- */
+  .ctl{margin:0 0 10px}
+  .ctl:last-child{margin-bottom:2px}
+  .ctl .top{display:flex;align-items:baseline;gap:8px;margin:0 0 5px}
+  .ctl label{
+    font:400 11.5px/1 var(--sans);letter-spacing:.005em;color:#a3adc1;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:default;
+  }
+  .val{
+    margin-left:auto;flex:none;
+    font:400 10.5px/1 var(--mono);font-variant-numeric:tabular-nums;
+    letter-spacing:.02em;color:#c9d5e8;
+    min-width:3.9em;text-align:right;
+    transition:color var(--dur);
+  }
+  .ctl:hover .val,.ctl:focus-within .val{color:#eaf4ff}
+
+  /* ---- slider ---- */
+  input[type=range]{
+    --p:0;
+    -webkit-appearance:none;appearance:none;
+    display:block;width:100%;height:13px;margin:0;padding:0;
+    background:transparent;cursor:pointer;
+  }
+  input[type=range]:focus:not(:focus-visible){outline:none}
+  input[type=range]:focus-visible{outline:2px solid var(--focus);outline-offset:3px;border-radius:5px}
+  input[type=range]::-webkit-slider-runnable-track{
+    height:4px;border-radius:3px;
+    background:
+      linear-gradient(90deg,#eef6ff,#8ed2f4) left center/calc(var(--p)*(100% - 13px) + 6.5px) 100% no-repeat,
+      rgba(255,255,255,.085);
+    box-shadow:inset 0 1px 1.5px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.045);
+  }
+  input[type=range]::-moz-range-track{
+    height:4px;border-radius:3px;
+    background:
+      linear-gradient(90deg,#eef6ff,#8ed2f4) left center/calc(var(--p)*(100% - 13px) + 6.5px) 100% no-repeat,
+      rgba(255,255,255,.085);
+    box-shadow:inset 0 1px 1.5px rgba(0,0,0,.55),inset 0 0 0 1px rgba(255,255,255,.045);
+  }
+  input[type=range]::-webkit-slider-thumb{
+    -webkit-appearance:none;
+    width:13px;height:13px;border-radius:50%;margin-top:-4.5px;
+    background:radial-gradient(circle at 36% 30%,#ffffff,#d5e2f2 55%,#93a6bd);
+    box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.7),0 0 10px rgba(127,216,255,.28);
+    transition:box-shadow var(--dur);
+  }
+  input[type=range]::-moz-range-thumb{
+    width:13px;height:13px;border:0;border-radius:50%;
+    background:radial-gradient(circle at 36% 30%,#ffffff,#d5e2f2 55%,#93a6bd);
+    box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.7),0 0 10px rgba(127,216,255,.28);
+  }
+  input[type=range]:hover::-webkit-slider-thumb{box-shadow:0 0 0 1px rgba(0,0,0,.55),0 1px 3px rgba(0,0,0,.7),0 0 16px rgba(127,216,255,.7)}
+  input[type=range]:active::-webkit-slider-thumb{background:radial-gradient(circle at 36% 30%,#ffffff,#e8f6ff 60%,#a9d8f0)}
+  input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px var(--focus),0 1px 3px rgba(0,0,0,.7),0 0 16px rgba(127,216,255,.6)}
+  input[type=range]:focus-visible::-moz-range-thumb{box-shadow:0 0 0 3px var(--focus),0 1px 3px rgba(0,0,0,.7)}
+
+  /* ---- chips (presets) ---- */
+  .chips{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:0 0 2px}
+  .chip{
+    font:500 10.5px/1 var(--sans);letter-spacing:.045em;
+    color:#a9b3c6;background:rgba(255,255,255,.038);
+    border:1px solid var(--line);border-radius:7px;
+    padding:7px 4px 7.5px;cursor:pointer;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    transition:background var(--dur),border-color var(--dur),color var(--dur),box-shadow var(--dur);
+  }
+  .chip:hover{background:rgba(255,255,255,.10);border-color:var(--line2);color:#eaf1fb}
+  .chip[aria-pressed="true"]{
+    background:rgba(127,216,255,.14);border-color:rgba(127,216,255,.42);color:#d8f2ff;
+    box-shadow:0 0 14px -4px rgba(127,216,255,.55),inset 0 0 0 1px rgba(127,216,255,.08);
+  }
+
+  /* ---- buttons ---- */
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:1px}
+  .btn{
+    font:500 11px/1 var(--sans);letter-spacing:.035em;
+    color:#bcc6d8;background:rgba(255,255,255,.042);
+    border:1px solid var(--line);border-radius:8px;
+    padding:8px 6px;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:6px;
+    transition:background var(--dur),border-color var(--dur),color var(--dur),box-shadow var(--dur);
+  }
+  .btn:hover{background:rgba(255,255,255,.095);border-color:var(--line2);color:#f2f6fd}
+  .btn:active{background:rgba(255,255,255,.14)}
+  .btn[aria-pressed="true"]{
+    background:rgba(127,216,255,.15);border-color:rgba(127,216,255,.45);color:#d8f2ff;
+    box-shadow:0 0 16px -5px rgba(127,216,255,.65),inset 0 0 0 1px rgba(127,216,255,.08);
+  }
+  .btn .led{
+    width:5px;height:5px;border-radius:50%;flex:none;
+    background:rgba(255,255,255,.16);transition:background var(--dur),box-shadow var(--dur);
+  }
+  .btn[aria-pressed="true"] .led{background:var(--accent);box-shadow:0 0 8px 1px rgba(127,216,255,.85)}
+  .btn[disabled]{opacity:.55;cursor:progress;background:rgba(255,255,255,.03)}
+  .btn.pri{
+    width:100%;margin-top:1px;padding:9.5px 6px;
+    color:#dceeff;background:rgba(127,216,255,.10);border-color:rgba(127,216,255,.28);
+  }
+  .btn.pri:hover{background:rgba(127,216,255,.18);border-color:rgba(127,216,255,.5);color:#f2fbff}
+  .btn .lbl{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* ---- segmented control ---- */
+  .segrow{display:flex;align-items:center;gap:10px;margin:0 0 9px}
+  .seglabel{font:400 11.5px/1 var(--sans);color:#a3adc1;white-space:nowrap}
+  .seg{
+    margin-left:auto;display:flex;flex:none;
+    border:1px solid var(--line);border-radius:7px;overflow:hidden;
+    background:rgba(0,0,0,.22);
+  }
+  .sgb{
+    font:400 10px/1 var(--mono);letter-spacing:.04em;color:#98a3b7;
+    background:transparent;border:0;padding:6px 9.5px;cursor:pointer;
+    transition:background var(--dur),color var(--dur);
+  }
+  .sgb+.sgb{border-left:1px solid var(--line)}
+  .sgb:hover{background:rgba(255,255,255,.07);color:#e6eefb}
+  .sgb[aria-pressed="true"]{background:rgba(127,216,255,.16);color:#dbf3ff;box-shadow:inset 0 0 0 1px rgba(127,216,255,.14)}
+
+  .kbd{
+    font:500 8.5px/1 var(--mono);letter-spacing:.06em;color:#5a6376;
+    border:1px solid rgba(255,255,255,.10);border-radius:4px;padding:2px 3.5px;margin-left:1px;
+  }
+  .btn:hover .kbd{color:#8fa0b8;border-color:rgba(255,255,255,.2)}
+
+  button:focus-visible,.chip:focus-visible,.sgb:focus-visible,.gact:focus-visible,.chev:focus-visible{
+    outline:2px solid var(--focus);outline-offset:2px;
+  }
+
+  /* ============================================================ scene gizmos */
+  .giz{position:absolute;inset:0;pointer-events:none;overflow:hidden;contain:layout paint;
+       opacity:1;transition:opacity .5s ease .15s}
+  /* the handles step out of the way once you stop touching the scene, so the
+     artwork can be looked at — any pointer move or focus brings them back */
+  .giz.idle{opacity:0}
+  .giz:focus-within{opacity:1;transition-delay:0s}
+  .arcs{position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;overflow:visible}
+  .arcs path,.arcs line{fill:none;stroke-linecap:round;vector-effect:non-scaling-stroke}
+  .arcs .g{stroke:rgba(0,0,0,.34);stroke-width:2.5}         /* backing, for beams */
+  .arcs .g.dash{stroke-dasharray:1.5 8;stroke-width:3}
+  .arcs .a{stroke:rgba(198,228,252,.50);stroke-width:1}
+  .arcs .a.dash{stroke-dasharray:1.5 8;stroke:rgba(198,228,252,.34);stroke-width:1.25}
+  .arcs .a.hot{stroke:rgba(127,216,255,.95);stroke-width:1.25}
+  .arcs .a.dash.hot{stroke-dasharray:1.5 8;stroke:rgba(127,216,255,.8)}
+
+  .hnd{
+    position:absolute;left:0;top:0;width:34px;height:34px;margin:-17px 0 0 -17px;
+    padding:0;border:0;background:none;display:grid;place-items:center;
+    pointer-events:auto;cursor:grab;
+    -webkit-tap-highlight-color:transparent;
+  }
+  /* dual-contrast ring: bright rim + dark core + dark halo, so it stays legible
+     both on the near-black wall and on top of a blown-out beam */
+  .hnd i{
+    display:block;width:11px;height:11px;border-radius:50%;
+    border:1.5px solid rgba(226,240,255,.92);background:rgba(6,9,14,.62);
+    box-shadow:0 0 0 1.5px rgba(0,0,0,.62),0 1px 5px rgba(0,0,0,.65);
+    transition:transform var(--dur),background var(--dur),box-shadow var(--dur),border-color var(--dur);
+  }
+  .hnd.size i{border-radius:3px;transform:rotate(45deg)}
+  .hnd:hover i,.hnd.act i,.hnd:focus-visible i{
+    background:var(--accent);border-color:#f0fbff;transform:scale(1.25);
+    box-shadow:0 0 0 1.5px rgba(0,0,0,.62),0 0 18px 2px rgba(127,216,255,.85);
+  }
+  .hnd.size:hover i,.hnd.size.act i,.hnd.size:focus-visible i{transform:rotate(45deg) scale(1.25)}
+  .hnd.act{cursor:grabbing}
+  .hnd:focus-visible{outline:none}
+  .hnd:focus-visible i{box-shadow:0 0 0 3px var(--focus),0 0 18px 2px rgba(127,216,255,.7)}
+  .hnd.off{display:none}
+  body.dragging .hnd{cursor:grabbing}
+
+  /* ================================================================ chrome   */
+  .brand{position:absolute;left:24px;bottom:20px;pointer-events:none}
+  .brand h1{
+    margin:0;font:600 15px/1 var(--sans);letter-spacing:.44em;text-transform:uppercase;color:#e2e9f4;
+    text-shadow:0 2px 22px rgba(0,0,0,.85);
+  }
+  .brand p{
+    margin:7px 0 0;font:400 9px/1 var(--mono);letter-spacing:.24em;text-transform:uppercase;color:#5b6478;
+  }
+
+  .hud{
+    position:absolute;left:50%;top:20px;
+    transform:translate(-50%,-7px);
+    font:400 11px/1 var(--mono);letter-spacing:.09em;color:#e2eefb;
+    background:rgba(10,13,19,.72);border:1px solid var(--line2);border-radius:9px;
+    padding:8px 13px;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    opacity:0;pointer-events:none;white-space:nowrap;
+    transition:opacity var(--dur) ease,transform var(--dur) ease;
+  }
+  .hud .u{color:#6f7a8f;margin-right:7px}
+  .hud.on{opacity:1;transform:translate(-50%,0)}
+
+  .hint{
+    position:absolute;left:50%;bottom:22px;transform:translateX(-50%);
+    font:400 11px/1 var(--sans);letter-spacing:.035em;color:#7d8698;
+    background:rgba(10,12,17,.55);border:1px solid var(--line);border-radius:100px;
+    padding:8px 17px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    transition:opacity .6s ease;pointer-events:none;white-space:nowrap;
+    max-width:calc(100vw - 32px);overflow:hidden;text-overflow:ellipsis;
+  }
+  .hint b{color:#c2cddf;font-weight:500}
+  .hint em{font-style:normal;color:#39404e;margin:0 3px}
+  .hint.gone{opacity:0}
+
+  .fps{
+    position:absolute;right:20px;bottom:18px;
+    font:400 9.5px/1 var(--mono);letter-spacing:.13em;color:#454c5c;
+    font-variant-numeric:tabular-nums;pointer-events:none;
+  }
+
+  /* ================================================================ responsive */
+  @media (max-width:640px){
+    .panel{left:10px;right:10px;top:auto;bottom:10px;width:auto}
+    .body{max-height:min(44vh,380px);padding-bottom:12px}
+    .brand{display:none}
+    .hint{top:44px;bottom:auto;font-size:10px;padding:7px 13px}
+    .fps{right:12px;bottom:auto;top:18px}
+    .btns{gap:6px}
+  }
+  @media (max-height:560px){
+    .brand{display:none}
+    .grp{margin:12px 0 8px}
+    .ctl{margin:0 0 9px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{transition-duration:.001ms !important;animation-duration:.001ms !important}
+    .hnd i,.chev svg{transition:none}
+  }
+/*#ENDREGION STYLE*/
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+
+<!--#REGION UIHTML-->
+<div class="ui" id="ui">
+
+  <!-- direct-manipulation handles, positioned every frame by INTERACT -->
+  <div class="giz" id="giz"></div>
+
+  <section class="panel" id="panel" aria-label="Prisma controls">
+    <header class="phead">
+      <span class="dot" aria-hidden="true"></span>
+      <h2 class="title">Prisma</h2>
+      <span class="sub">optics lab</span>
+      <button class="chev" id="bCol" type="button" aria-expanded="true" aria-controls="pbody" title="Collapse panel (C)" aria-label="Collapse panel">
+        <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.6 4.4 6 7.8 9.4 4.4"/></svg>
+      </button>
+    </header>
+
+    <div class="body" id="pbody">
+
+      <div class="grp"><span>Presets</span><i class="rule"></i></div>
+      <div class="chips" id="chips" role="group" aria-label="Scene presets">
+        <button class="chip" type="button" data-p="0" aria-pressed="true">Studio</button>
+        <button class="chip" type="button" data-p="1" aria-pressed="false">Spectra</button>
+        <button class="chip" type="button" data-p="2" aria-pressed="false">Solo</button>
+        <button class="chip" type="button" data-p="3" aria-pressed="false">Halo</button>
+        <button class="chip" type="button" data-p="4" aria-pressed="false">Vapour</button>
+        <button class="chip" type="button" data-p="5" aria-pressed="false">Nocturne</button>
+      </div>
+
+      <div class="grp"><span>Source</span><i class="rule"></i></div>
+      <div class="ctl">
+        <div class="top"><label for="sEmit">Emitters</label><span class="val" id="vEmit">4</span></div>
+        <input id="sEmit" type="range" min="1" max="8" step="1" value="4" aria-label="Emitter count">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sRays">Spectrum</label><span class="val" id="vRays">72</span></div>
+        <input id="sRays" type="range" min="8" max="128" step="1" value="72" aria-label="Spectral samples per emitter">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sPow">Power</label><span class="val" id="vPow">1.00</span></div>
+        <input id="sPow" type="range" min="0.1" max="3" step="0.01" value="1" aria-label="Emitter power">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sW">Beam width</label><span class="val" id="vW">1.00</span></div>
+        <input id="sW" type="range" min="0.3" max="3" step="0.01" value="1" aria-label="Beam width">
+      </div>
+
+      <div class="grp"><span>Optics</span><i class="rule"></i></div>
+      <div class="ctl">
+        <div class="top"><label for="sIor">Refraction</label><span class="val" id="vIor">1.62</span></div>
+        <input id="sIor" type="range" min="1.2" max="2.2" step="0.005" value="1.62" aria-label="Index of refraction">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sDisp">Dispersion</label><span class="val" id="vDisp">.021</span></div>
+        <input id="sDisp" type="range" min="0" max="0.12" step="0.0005" value="0.06" aria-label="Dispersion, Cauchy B coefficient">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sB">Bounces</label><span class="val" id="vB">9</span></div>
+        <input id="sB" type="range" min="1" max="14" step="1" value="9" aria-label="Maximum internal bounces">
+      </div>
+
+      <div class="grp"><span>Camera</span><i class="rule"></i></div>
+      <div class="ctl">
+        <div class="top"><label for="sExp">Exposure</label><span class="val" id="vExp">1.00</span></div>
+        <input id="sExp" type="range" min="0.2" max="3" step="0.01" value="1.13" aria-label="Exposure">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sBloom">Bloom</label><span class="val" id="vBloom">0.90</span></div>
+        <input id="sBloom" type="range" min="0" max="2" step="0.01" value="0.9" aria-label="Bloom intensity">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sStreak">Streak</label><span class="val" id="vStreak">0.42</span></div>
+        <input id="sStreak" type="range" min="0" max="1.5" step="0.01" value="0.42" aria-label="Anamorphic streak intensity">
+      </div>
+      <div class="ctl">
+        <div class="top"><label for="sGrain">Grain</label><span class="val" id="vGrain">0.70</span></div>
+        <input id="sGrain" type="range" min="0" max="2" step="0.01" value="0.7" aria-label="Film grain">
+      </div>
+
+      <div class="grp"><span>Scene</span><i class="rule"></i>
+        <button class="gact" id="bReset" type="button" title="Restore the default scene (R)">Reset</button>
+      </div>
+      <div class="btns">
+        <button class="btn" id="bSpin" type="button" aria-pressed="false" title="Slowly rotate the disc (O)"><span class="led" aria-hidden="true"></span><span class="lbl">Auto-orbit</span></button>
+        <button class="btn" id="bMono" type="button" aria-pressed="false" title="Single wavelength per emitter (M)"><span class="led" aria-hidden="true"></span><span class="lbl">Monochrome</span></button>
+      </div>
+
+      <div class="grp"><span>Export</span><i class="rule"></i></div>
+      <div class="segrow">
+        <span class="seglabel" id="lblScale">Supersampling</span>
+        <div class="seg" role="group" aria-labelledby="lblScale">
+          <button class="sgb" type="button" data-x="1" aria-pressed="false" aria-label="Export at 1x">1&times;</button>
+          <button class="sgb" type="button" data-x="2" aria-pressed="true"  aria-label="Export at 2x">2&times;</button>
+          <button class="sgb" type="button" data-x="4" aria-pressed="false" aria-label="Export at 4x">4&times;</button>
+        </div>
+      </div>
+      <button class="btn pri" id="bShot" type="button" title="Render and download a supersampled still (S)"><span class="lbl">Save PNG</span><span class="kbd" aria-hidden="true">S</span></button>
+
+    </div>
+  </section>
+
+  <div class="brand">
+    <h1>Prisma</h1>
+    <p>Spectral ray-tracing sandbox</p>
+  </div>
+
+  <div class="hud" id="hud" role="status" aria-live="off"></div>
+
+  <div class="hint" id="hint"><b>Drag</b> emitters &amp; disc<em>·</em><b>Handles</b> aim &amp; shape<em>·</em><b>Wheel</b> size<em>·</em><b>H</b> hides UI</div>
+  <div class="fps" id="fps"></div>
+</div>
+<!--#ENDREGION UIHTML-->
+
+<script>
+"use strict";
+/* ============================================================================
+   PRISMA — single-file spectral laser simulator
+   CPU spectral ray tracer  →  WebGL2 HDR pipeline (SDF stage, additive beams,
+   physically-flavoured bloom + anamorphic streaks, ACES tonemap, grain)
+   ========================================================================== */
+
+/* ---------------------------------------------------------------- utilities */
+const TAU = Math.PI * 2;
+const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+const lerp  = (a, b, t) => a + (b - a) * t;
+const smoothstep = (e0, e1, x) => { const t = clamp((x - e0) / (e1 - e0), 0, 1); return t * t * (3 - 2 * t); };
+const angNorm = a => { a %= TAU; if (a > Math.PI) a -= TAU; if (a < -Math.PI) a += TAU; return a; };
+/** visible band actually sampled by the emitters, in nanometres */
+const SPEC_LO = 398, SPEC_HI = 706;
+/** van der Corput radical inverse — a fixed, flicker-free stratification jitter */
+function vdc(i) { let r = 0, f = 0.5; while (i > 0) { r += f * (i & 1); i >>= 1; f *= 0.5; } return r; }
+
+/* ------------------------------------------------------- spectral → linear RGB
+   Wyman/Sloan/Shirley multi-lobe Gaussian fits of the CIE 1931 observer.      */
+function gauss(x, a, m, s1, s2) { const t = (x - m) * (x < m ? 1 / s1 : 1 / s2); return a * Math.exp(-0.5 * t * t); }
+function cieXYZ(l) {
+  const x = gauss(l, 1.056, 599.8, 37.9, 31.0) + gauss(l, 0.362, 442.0, 16.0, 26.7) + gauss(l, -0.065, 501.1, 20.4, 26.2);
+  const y = gauss(l, 0.821, 568.8, 46.9, 40.5) + gauss(l, 0.286, 530.9, 16.3, 31.1);
+  const z = gauss(l, 1.217, 437.0, 11.8, 36.0) + gauss(l, 0.681, 459.0, 26.0, 13.8);
+  return [x, y, z];
+}
+function xyzToRGB(X, Y, Z) {
+  return [
+    3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+   -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+    0.0557 * X - 0.2040 * Y + 1.0570 * Z
+  ];
+}
+/* Out-of-gamut spectral colours have negative sRGB components. Rather than
+   clipping them (which flattens violet and cyan into mush) we desaturate each
+   one just far enough to bring it inside the gamut, preserving its hue and
+   its luminance. */
+function toGamut(r, g, b) {
+  const w = Math.min(r, g, b);
+  if (w < 0) { r -= w; g -= w; b -= w; }               // add white until in gamut
+  return [r, g, b];
+}
+/** Linear-sRGB radiance of a single wavelength.  Scaled by SPEC_NORM so that a
+ *  flat (equal-energy) spectrum integrates to neutral white — which means the
+ *  rainbow keeps its true luminance profile: bright yellow-green, dim violet. */
+let SPEC_NORM = [1, 1, 1];
+function waveRGBraw(l) {
+  const [X, Y, Z] = cieXYZ(l);
+  const [r, g, b] = toGamut(...xyzToRGB(X, Y, Z));
+  return [Math.max(0, r), Math.max(0, g), Math.max(0, b)];
+}
+function waveRGB(l) {
+  const c = waveRGBraw(l);
+  return [c[0] * SPEC_NORM[0], c[1] * SPEC_NORM[1], c[2] * SPEC_NORM[2]];
+}
+(function calibrateSpectrum() {
+  let sr = 0, sg = 0, sb = 0, n = 0;
+  for (let l = SPEC_LO; l <= SPEC_HI; l += 0.5) {
+    const c = waveRGBraw(l); sr += c[0]; sg += c[1]; sb += c[2]; n++;
+  }
+  SPEC_NORM = [n / sr, n / sg, n / sb];
+})();
+
+//#REGION PHYSICS
+/* ---------------------------------------------------------------- the scene
+   World units: 1.0 = viewport height, +y points DOWN the screen.
+
+   Disc silhouette measured off the reference plate (centre 0.885/0.497,
+   R 0.305).  The mouth is a 92.8deg wedge whose bisector points at 183.9deg,
+   so the two polished cut faces lie at
+
+       lower cut face  137.5deg   tip (0.660, 0.703)
+       upper cut face  230.3deg   tip (0.690, 0.262)
+
+   i.e. the mouth opens to the left, straight at the emitter stack.          */
+const DISC0 = { x: 0.885, y: 0.497, r: 0.305, wdir: 3.210, whalf: 0.810, spin: 0 };
+
+/* Emitter rig.  Four heads stacked at the left; each is aimed at its own
+   point along the LOWER cut face, parameterised by u = fraction of the face
+   length measured from the disc centre out to the rim tip.  Because the
+   targets are spread over 0.24..0.84 of a face that is much shorter than the
+   emitter stack is tall, the beams converge slightly on their way in — the
+   top beam runs 14deg below horizontal, the bottom one 3deg above it —
+   which is the geometry in the reference.                                   */
+const EMIT_X   = 0.255;   // x of the emitter stack
+const EMIT_CY  = 0.545;   // centre of the stack
+const EMIT_GAP = 0.095;   // vertical pitch between heads
+const EMIT_MAXSPAN = 0.54;
+const FACE_U0  = 0.24;    // entry point of the first beam along the cut face
+const FACE_U1  = 0.84;    // entry point of the last beam
+
+/* Optics.  The inward normal of the lower cut face points at 47.5deg, so the
+   four beams meet it at 32.8 / 37.6 / 43.5 / 50.7 deg of incidence — steep
+   enough that only 5..11% reflects (those faint near-vertical returns that
+   cross the mouth) while the rest refracts in at 24..34deg and runs
+   down-right as a band of near-parallel streaks along the face.
+
+   n_d = 1.36 with a very heavy Cauchy B = 0.06 um^2: n(400nm) = 1.562,
+   n(700nm) = 1.310.  Low index + big dn is deliberate — the angular
+   dispersion of the entry refraction goes as sin(i)/(n^2 cos t), so dropping
+   the index widens each internal streak into a visible 5.5..7deg rainbow
+   wedge instead of a white line.  The critical angle runs 39.8deg (violet) to
+   49.8deg (red); a ray entering at u total-internally-reflects off the arc
+   once u > (1/n)/cos t, i.e. u > 0.81 for violet and u > 0.89 for red, so the
+   outermost beam sits right on that edge — its blue end rings around the rim
+   while its red end leaves with the fan.
+
+   The streaks cross the disc, converge to a caustic just inside the lower
+   right rim and leave the arc between 37 and 58deg round it, fanning from
+   +20deg to -17deg: a broad dispersed fan sweeping to the lower right.      */
+const DEF = { nEmit: 4, rays: 108, power: 1.5, beamW: 1, ior: 1.36, disp: 0.06, bounces: 8 };
+
+const scene = {
+  disc: { x: DISC0.x, y: DISC0.y, r: DISC0.r, wdir: DISC0.wdir, whalf: DISC0.whalf, spin: 0 },
+  emitters: [],
+  nEmit: DEF.nEmit,
+  rays: DEF.rays,
+  power: DEF.power,
+  beamW: DEF.beamW,
+  ior: DEF.ior,
+  disp: DEF.disp,
+  bounces: DEF.bounces,
+  mono: false,
+  spin: false
+};
+
+/** Restore the model's own defaults, then let the panel re-read them. */
+function syncSliders() {
+  for (const k in DEF) scene[k] = DEF[k];
+  if (typeof syncControls === 'function') syncControls();
+}
+
+function defaultEmitters() {
+  const e = [];
+  for (let i = 0; i < 8; i++) e.push({ x: EMIT_X, y: EMIT_CY, a: 0, lam: 400 + (i / 7) * 280 });
+  return e;
+}
+/** Stack the emitters and aim each at a different point along the lower cut
+ *  face, which is what produces the fanned band of internal reflections.
+ *  Works for any count 1..8: the stack keeps a constant pitch until it would
+ *  outgrow the frame, and the entry points always span the same run of face. */
+function layoutEmitters() {
+  const n = clamp(scene.nEmit | 0, 1, scene.emitters.length);
+  const span = Math.min(EMIT_GAP * (n - 1), EMIT_MAXSPAN);
+  for (let i = 0; i < scene.emitters.length; i++) {
+    if (i >= n) continue;
+    const e = scene.emitters[i];
+    const t = n === 1 ? 0.5 : i / (n - 1);
+    e.x = EMIT_X;
+    e.y = EMIT_CY + (t - 0.5) * span;
+    aimAtFace(e, t);
+  }
+}
+function aimAtFace(e, t) {
+  const d = scene.disc;
+  const th = d.wdir - d.whalf;                    // the lower (screen) cut face
+  const u = (FACE_U0 + (FACE_U1 - FACE_U0) * clamp(t, 0, 1)) * d.r;
+  const tx = d.x + Math.cos(th) * u;
+  const ty = d.y + Math.sin(th) * u;
+  e.a = Math.atan2(ty - e.y, tx - e.x);
+}
+function resetScene() {
+  scene.disc = { x: DISC0.x, y: DISC0.y, r: DISC0.r, wdir: DISC0.wdir, whalf: DISC0.whalf, spin: 0 };
+  scene.emitters = defaultEmitters();
+  syncSliders();
+  layoutEmitters();
+  dirty = true;
+}
+//#ENDREGION PHYSICS
+
+/* ------------------------------------------------------------- disc geometry
+   Solid = circle(R) minus an angular wedge  ("pac-man").                      */
+function discInside(px, py) {
+  const d = scene.disc;
+  const dx = px - d.x, dy = py - d.y;
+  if (dx * dx + dy * dy > d.r * d.r) return false;
+  const a = Math.atan2(dy, dx);
+  return Math.abs(angNorm(a - d.wdir)) > d.whalf;
+}
+
+const EPS = 1e-6;
+/** Nearest intersection of ray(o,dir) with the disc solid's boundary. */
+function discHit(ox, oy, dx, dy) {
+  const D = scene.disc;
+  let best = Infinity, nx = 0, ny = 0;
+
+  // --- circle arc
+  const fx = ox - D.x, fy = oy - D.y;
+  const b = fx * dx + fy * dy;
+  const c = fx * fx + fy * fy - D.r * D.r;
+  let disc2 = b * b - c;
+  if (disc2 > 0) {
+    const s = Math.sqrt(disc2);
+    for (const t of [-b - s, -b + s]) {
+      if (t > 1e-5 && t < best) {
+        const px = ox + dx * t, py = oy + dy * t;
+        const a = Math.atan2(py - D.y, px - D.x);
+        if (Math.abs(angNorm(a - D.wdir)) > D.whalf) {
+          best = t; nx = (px - D.x) / D.r; ny = (py - D.y) / D.r;
+        }
+      }
+    }
+  }
+  // --- the two straight cut faces (centre → rim)
+  for (const sgn of [-1, 1]) {
+    const th = D.wdir + sgn * D.whalf;
+    const ex = Math.cos(th), ey = Math.sin(th);
+    const den = dx * ey - dy * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const rx = D.x - ox, ry = D.y - oy;
+    const t = (rx * ey - ry * ex) / den;          // along ray
+    const u = (rx * dy - ry * dx) / den;          // along edge, 0..R
+    if (t > 1e-5 && t < best && u >= 0 && u <= D.r) {
+      best = t; nx = -ey * sgn; ny = ex * sgn;    // points into the empty wedge
+    }
+  }
+  if (!isFinite(best)) return null;
+  return { t: best, nx, ny };
+}
+
+/* ------------------------------------------------------------- ray tracer */
+const MAX_SEG = 90000;
+const segData = new Float32Array(MAX_SEG * 12);    // ax ay bx by | r g b power | dist inside _ _
+let segCount = 0;
+const HOT_MAX = 32768;
+const hotData = new Float32Array(HOT_MAX * 6);     // x y r g b power  (impact flares)
+let hotCount = 0;
+
+function pushSeg(ax, ay, bx, by, r, g, b, p, dist, inside) {
+  if (segCount >= MAX_SEG) return;
+  const i = segCount * 12;
+  segData[i] = ax; segData[i + 1] = ay; segData[i + 2] = bx; segData[i + 3] = by;
+  segData[i + 4] = r; segData[i + 5] = g; segData[i + 6] = b; segData[i + 7] = p;
+  segData[i + 8] = dist; segData[i + 9] = inside; segData[i + 10] = 0; segData[i + 11] = 0;
+  segCount++;
+}
+function pushHot(x, y, r, g, b, p) {
+  if (hotCount >= HOT_MAX) return;
+  const i = hotCount * 6;
+  hotData[i] = x; hotData[i + 1] = y; hotData[i + 2] = r;
+  hotData[i + 3] = g; hotData[i + 4] = b; hotData[i + 5] = p;
+  hotCount++;
+}
+
+/** Cauchy dispersion: n(λ) = A + B/λ²  (λ in µm) */
+function iorAt(lam) {
+  const um = lam * 1e-3;
+  const B = scene.disp;
+  return scene.ior + B / (um * um) - B / (0.5893 * 0.5893);
+}
+
+let traceRefPower = 1;
+const stack = [];
+function trace() {
+  segCount = 0; hotCount = 0;
+  const N = scene.mono ? 1 : scene.rays;
+  const S = Math.max(1, scene.subRays | 0);            // rays across the beam waist
+  const waist = (scene.waist !== undefined ? scene.waist : 0.0035) * scene.beamW;
+  // Radiant power per emitter is held constant as the spectrum and the beam
+  // waist are resampled, so the Power slider means what it says.
+  const pw = scene.power * (scene.mono ? 0.95 : 1.15 / N) / S;
+  traceRefPower = Math.max(pw, 1e-6);
+
+  for (let ei = 0; ei < scene.nEmit; ei++) {
+    const e = scene.emitters[ei];
+    const dx = Math.cos(e.a), dy = Math.sin(e.a);
+    const px = -dy, py = dx;                            // beam-normal
+    const bx = e.x + dx * 0.030, by = e.y + dy * 0.030;
+    // the aperture itself is a brilliant point source with a star flare
+    // sub-linear in power: a brighter source blooms, it does not grow a
+    // bigger disc, so the flare stays the size of the aperture
+    pushHot(bx, by, 1, 1, 1, 2.25 * Math.pow(scene.power, 0.55));
+
+    for (let k = 0; k < N; k++) {
+      // stratified with a deterministic low-discrepancy jitter, so the exiting
+      // fan is a continuous wash instead of N discrete lines
+      const u = N === 1 ? 0.5 : (k + (vdc(k + 1) - 0.5) * 0.9) / (N - 1);
+      const lam = scene.mono ? e.lam : SPEC_LO + clamp(u, 0, 1) * (SPEC_HI - SPEC_LO);
+      const col = waveRGB(lam);
+      const n2 = iorAt(lam);
+      for (let s = 0; s < S; s++) {
+        const t = S === 1 ? 0 : (s / (S - 1) - 0.5) * 2;
+        const off = t * waist;
+        castRay(bx + px * off, by + py * off, dx, dy, col, pw, n2);
+      }
+    }
+  }
+}
+
+function castRay(ox, oy, dx, dy, col, power, nGlass) {
+  stack.length = 0;
+  stack.push([ox, oy, dx, dy, power, 0, discInside(ox, oy) ? 1 : 0]);
+
+  while (stack.length) {
+    const s = stack.pop();
+    let [x, y, ux, uy, p, depth, inside, dist] = s;
+    if (p < traceRefPower * 0.006 || depth > scene.bounces || segCount >= MAX_SEG - 4) continue;
+
+    const h = discHit(x, y, ux, uy);
+    const [cr, cg, cb] = col;
+
+    if (!h) {                                        // escapes to infinity
+      pushSeg(x, y, x + ux * 6, y + uy * 6, cr, cg, cb, p, dist, inside);
+      continue;
+    }
+
+    const hx = x + ux * h.t, hy = y + uy * h.t;
+    // absorption inside glass (very slight cool tint, Beer–Lambert)
+    let att = 1;
+    if (inside) {
+      const dst = h.t;
+      att = Math.exp(-dst * 0.55);
+      p *= att;
+    }
+    // The sign of the power flags a segment as travelling inside the glass;
+    // the renderer gives those a broad scattered sheath.
+    const segP = s[4] * (inside ? (1 + att) * 0.5 : 1);
+    pushSeg(x, y, hx, hy, cr, cg, cb, segP, dist, inside);
+
+    // orient normal against the incoming direction
+    let nx = h.nx, ny = h.ny;
+    let cosi = -(ux * nx + uy * ny);
+    if (cosi < 0) { nx = -nx; ny = -ny; cosi = -cosi; }
+    cosi = clamp(cosi, 0, 1);
+
+    const n1 = inside ? nGlass : 1.0;
+    const nn = inside ? 1.0 : nGlass;
+    const eta = n1 / nn;
+    const sin2t = eta * eta * (1 - cosi * cosi);
+
+    let R;
+    let tx = 0, ty = 0, hasT = false;
+    if (sin2t > 1) { R = 1; }                        // total internal reflection
+    else {
+      const cost = Math.sqrt(1 - sin2t);
+      const Rs = ((n1 * cosi - nn * cost) / (n1 * cosi + nn * cost)) ** 2;
+      const Rp = ((n1 * cost - nn * cosi) / (n1 * cost + nn * cosi)) ** 2;
+      R = clamp((Rs + Rp) * 0.5, 0, 1);
+      tx = eta * ux + (eta * cosi - cost) * nx;
+      ty = eta * uy + (eta * cosi - cost) * ny;
+      hasT = true;
+    }
+    const T = 1 - R;
+
+    // impact flare on the outer surface
+    if (!inside && p * R > traceRefPower * 0.55) pushHot(hx, hy, cr, cg, cb, p * (0.35 + R));
+    if (inside && p * T > traceRefPower * 1.2)  pushHot(hx, hy, cr, cg, cb, p * T * 0.5);
+
+    const rx = ux + 2 * cosi * nx, ry = uy + 2 * cosi * ny;
+    const off = 2e-5;
+    const d2 = dist + h.t;
+    if (p * R > traceRefPower * 0.010) stack.push([hx + rx * off, hy + ry * off, rx, ry, p * R, depth + 1, inside, d2]);
+    if (hasT && p * T > traceRefPower * 0.010) stack.push([hx + tx * off, hy + ty * off, tx, ty, p * T, depth + 1, inside ? 0 : 1, d2]);
+  }
+}
+
+/* =========================================================================== */
+/*                                  RENDERER                                   */
+/* =========================================================================== */
+const canvas = document.getElementById('gl');
+const gl = canvas.getContext('webgl2', { antialias: false, alpha: false, powerPreference: 'high-performance', preserveDrawingBuffer: true });
+if (!gl) { document.body.innerHTML = '<p style="padding:40px;font:16px sans-serif;color:#ccc">WebGL2 is required.</p>'; throw new Error('no webgl2'); }
+const extF = gl.getExtension('EXT_color_buffer_float');
+const extL = gl.getExtension('OES_texture_float_linear');
+const HDR_FMT = extF ? gl.RGBA16F : gl.RGBA8;
+const HDR_TYPE = extF ? gl.HALF_FLOAT : gl.UNSIGNED_BYTE;
+
+function sh(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    console.error(gl.getShaderInfoLog(s), src.split('\n').map((l, i) => (i + 1) + ' ' + l).join('\n'));
+    throw new Error('shader');
+  }
+  return s;
+}
+function prog(vs, fs) {
+  const p = gl.createProgram();
+  gl.attachShader(p, sh(gl.VERTEX_SHADER, vs));
+  gl.attachShader(p, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) { console.error(gl.getProgramInfoLog(p)); throw new Error('link'); }
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) { const info = gl.getActiveUniform(p, i); u[info.name.replace('[0]', '')] = gl.getUniformLocation(p, info.name); }
+  return { p, u };
+}
+function makeFBO(w, h, fmt, type, filter) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, fmt, w, h, 0, gl.RGBA, type, null);
+  const f = filter || gl.LINEAR;
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const fb = gl.createFramebuffer();
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  return { fb, tex, w, h };
+}
+
+/* ------------------------------------------------------------ fullscreen tri */
+const VS_FULL = `#version 300 es
+out vec2 vUV;
+void main(){
+  vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2);
+  vUV = p;
+  gl_Position = vec4(p*2.0-1.0, 0.0, 1.0);
+}`;
+
+/* ------------------------------------------------------------ common noise */
+const GLSL_NOISE = `
+float hash21(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+float vnoise(vec2 p){
+  vec2 i=floor(p), f=fract(p);
+  f=f*f*(3.0-2.0*f);
+  float a=hash21(i), b=hash21(i+vec2(1,0)), c=hash21(i+vec2(0,1)), d=hash21(i+vec2(1,1));
+  return mix(mix(a,b,f.x), mix(c,d,f.x), f.y);
+}
+float fbm(vec2 p){
+  float s=0.0, a=0.5;
+  mat2 m = mat2(1.6,1.2,-1.2,1.6);
+  for(int i=0;i<5;i++){ s+=a*vnoise(p); p=m*p; a*=0.5; }
+  return s;
+}
+`;
+
+/* ============================== ENVIRONMENT PASS ==========================
+   Wall, soft key light, the dichroic disc (SDF), its shadow, and the emitter
+   housings — all rendered analytically in linear HDR.                        */
+const FS_ENV = `#version 300 es
+precision highp float;
+in vec2 vUV;
+out vec4 fragColor;
+
+uniform vec2  uRes;
+uniform float uH;
+uniform float uTime;
+uniform vec3  uDisc;      // cx, cy, R (world)
+uniform vec2  uWedge;     // dir, half
+uniform int   uNE;
+uniform vec4  uEm[8];     // x,y,angle,glow
+uniform float uHover;     // 0 none,1 disc
+uniform vec2  uHoverEm;   // index, strength
+uniform vec2  uJitter;    // sub-pixel offset for progressive supersampling
+uniform vec2  uOff;       // view offset, device px
+${GLSL_NOISE}
+
+const float PI = 3.14159265359;
+
+mat2 rot(float a){ float c=cos(a), s=sin(a); return mat2(c,s,-s,c); }
+
+float sdSegment(vec2 p, vec2 a, vec2 b){
+  vec2 pa=p-a, ba=b-a;
+  float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return length(pa-ba*h);
+}
+float sdBox(vec2 p, vec2 b){ vec2 d=abs(p)-b; return length(max(d,0.0))+min(max(d.x,d.y),0.0); }
+float sdRound(vec2 p, vec2 b, float r){ return sdBox(p,b-r)-r; }
+
+/* signed distance to an infinite sector centred on +X, half-aperture wh.
+   Negative inside the sector. */
+float sdSector(vec2 q, float wh){
+  q.y = abs(q.y);
+  vec2 e = vec2(cos(wh), sin(wh));
+  float h = max(dot(q, e), 0.0);
+  float d = length(q - e*h);
+  return (atan(q.y, q.x) <= wh) ? -d : d;
+}
+/* pac-man: circle minus wedge. returns signed distance (neg inside) */
+float sdDisc(vec2 p, vec2 c, float R, float wd, float wh){
+  vec2 q = p - c;
+  return max(length(q) - R, -sdSector(rot(-wd)*q, wh));
+}
+
+/* thin-film interference → RGB */
+vec3 thinFilm(float d, float cosT, float nf){
+  float st = sqrt(max(0.0, 1.0 - (1.0-cosT*cosT)/(nf*nf)));
+  float opd = 2.0*nf*d*st;
+  vec3 lam = vec3(612.0, 549.0, 464.0);
+  vec3 ph = TAUC*opd/lam + PI;
+  return 0.5+0.5*cos(ph);
+}
+
+void main(){
+  vec2 fc = gl_FragCoord.xy + uJitter;
+  vec2 P  = (vec2(fc.x, uRes.y - fc.y) - uOff) / uH;   // world units, y down
+  float px = 1.0/uH;                              // one pixel in world units
+  vec2 uv = fc/uRes;
+  float aspect = uRes.x/uRes.y;
+
+  //#REGION WALL
+/* ---------------- gallery wall ----------------
+   Charcoal plaster with a faint blue cast, lit by one broad soft key that sits
+   above and slightly left of the frame.  Levels are authored in linear HDR so
+   that after the optical vignette, the shoulder, the ACES RRT+ODT and the
+   shadow grade the wall lands on the reference: ~0.25 linear under the key,
+   ~0.075 across the middle, ~0.015 in the far corners.
+
+   The gradient is driven from uv / aspect (frame space) so the key stays
+   centred on the picture at any aspect ratio; P is used only for surface
+   texture, which belongs to the wall rather than to the frame.               */
+
+  // gl_FragCoord is y-up; flip so sv.y == 0 is the top of frame
+  vec2 sv = vec2(uv.x, 1.0 - uv.y);
+
+  // --- the key: a big soft box well above the top of frame, a touch left
+  vec2  kq  = vec2((sv.x - 0.465)*aspect*1.957, (sv.y + 0.370)*1.882);
+  float key = exp(-dot(kq,kq));
+
+  // --- ambient wash bouncing round the room: wide, mostly vertical, left-biased
+  vec2  wq  = vec2((sv.x - 0.205)*aspect*0.457, (sv.y - 0.228)*1.273);
+  float wrp = exp(-dot(wq,wq));
+
+  vec3 wall = vec3(0.29060, 0.35190, 0.49160) * key
+            + vec3(0.05710, 0.05970, 0.06910) * wrp
+            + vec3(0.01300, 0.00670, 0.00140);
+
+  // --- long, very smooth roll-off into the corners of the room
+  float rr = length(vec2((sv.x - 0.476)*aspect, sv.y - 0.521)) * 0.750;
+  wall *= 1.0 - 0.768*smoothstep(0.399, 1.067, rr);
+
+  /* --- plaster tooth ------------------------------------------------------
+     Purely multiplicative, so the deep corners keep their density instead of
+     picking up a noise floor.  Every term is kept below ~0.4 cycles/pixel at
+     the default view (one world unit is uH pixels, so vnoise(P*k) runs at
+     k/uH cycles per pixel) and the finest one is faded out with fwidth as it
+     approaches Nyquist -- no moire, no woven cross-hatch, just surface.      */
+  float fw   = fwidth(P.x);                     // world units per pixel
+  float band = 1.0 - smoothstep(0.0018, 0.0042, fw);   // fades the fine tooth
+
+  float m1 = fbm(P *   7.0);                    // broad trowel mottle
+  float m2 = fbm(P *  25.0);                    // medium plaster relief
+  float m3 = vnoise(P * 150.0);                 // tooth
+  float m4 = vnoise(P * 320.0 + 41.3);          // fine tooth, band-limited
+
+  wall *= 1.0 + (m1 - 0.5)*0.052
+              + (m2 - 0.5)*0.046
+              + (m3 - 0.5)*0.038
+              + (m4 - 0.5)*0.034*band;
+
+  vec3 col = max(wall, 0.0);
+//#ENDREGION WALL
+
+  //#REGION DISC
+/* ---------------- disc shadow: soft, offset, with contact darkening -------- */
+  {
+    vec2  so    = vec2(0.026, 0.040);                       // light from upper-left
+    float sdS   = sdDisc(P, uDisc.xy + so, uDisc.z*1.010, uWedge.x, uWedge.y);
+    float dNear = sdDisc(P, uDisc.xy, uDisc.z, uWedge.x, uWedge.y);
+
+    // broad penumbra (wide + very soft), squared for a non-linear falloff
+    float broad = 1.0 - smoothstep(-0.060, 0.170, sdS);
+    broad *= broad;
+    // mid penumbra
+    float midS  = 1.0 - smoothstep(-0.012, 0.060, sdS);
+    // tight contact core just under the disc
+    float tight = 1.0 - smoothstep(-0.004, 0.022, sdS);
+    // ambient occlusion hugging the silhouette in every direction
+    float ao    = 1.0 - smoothstep(0.0, 0.052, dNear);
+    ao *= ao;
+
+    float sh = clamp(0.46*broad + 0.28*midS + 0.22*tight + 0.24*ao, 0.0, 0.88);
+    col *= mix(vec3(1.0), vec3(0.20, 0.24, 0.36), sh);      // shadows go cool
+  }
+
+  /* ---------------- the dichroic disc ---------------- */
+  float d    = sdDisc(P, uDisc.xy, uDisc.z, uWedge.x, uWedge.y);
+  float mask = 1.0 - smoothstep(-px, px, d);
+
+  if (mask > 0.0015){
+    vec2  q  = (P - uDisc.xy)/uDisc.z;        // normalised local, y down
+    float r  = length(q);
+    float rr = min(r, 1.0);
+    float an = atan(q.y, q.x);
+
+    /* ================= 1. the stretched-film coordinate ==================
+       Two octaves of very low-frequency warp bend the interference bands
+       into long organic sweeps.  Frequencies here are ~1 cycle across the
+       whole disc, so nothing can alias.                                   */
+    vec2 w1 = vec2(vnoise(q*0.72 + vec2( 3.10, 7.40)),
+                   vnoise(q*0.72 + vec2(-5.20, 1.80))) - 0.5;
+    vec2 w2 = vec2(vnoise(q*1.45 + vec2(11.00, 2.30)),
+                   vnoise(q*1.45 + vec2(-1.50, 9.30))) - 0.5;
+    vec2 qw = q + w1*0.56 + w2*0.26;
+
+    // anisotropic frames: the sweeps run long in e2 / f2 and vary across e1 / f1
+    vec2 e1 = normalize(vec2( 0.82, -0.57));
+    vec2 e2 = vec2(-e1.y, e1.x);
+    vec2 f1 = normalize(vec2( 0.35,  0.94));
+    vec2 f2 = vec2(-f1.y, f1.x);
+    vec2 qa = vec2(dot(qw,e1)*1.75, dot(qw,e2)*0.13);
+    vec2 qb = vec2(dot(qw,f1)*1.35, dot(qw,f2)*0.17);
+
+    float s1 = fbm(qa + 2.0);                 // primary broad sweeps
+    float s2 = fbm(qb - 4.0);                 // crossing secondary sweeps
+    // the mottle is stretched too: nothing on this sheet is round
+    float s3 = fbm(vec2(dot(q,f1)*3.4, dot(q,f2)*1.05) + 9.0);
+
+    /* ================= 2. pseudo-3D surface ============================= */
+    float dome  = sqrt(max(1e-4, 1.0 - rr*rr*0.62));
+    vec2  slope = q*0.52 + w1*0.26 + (vec2(s2,s1)-0.5)*0.14;
+    vec3  n = normalize(vec3(slope, dome*1.20));
+    vec3  V = normalize(vec3(q*0.17, 2.40));
+    vec3  L = normalize(vec3(-0.48, -0.62, 0.66));   // key: upper-left, forward
+    float cosT = clamp(dot(n, V), 0.04, 1.0);
+    float ndl  = dot(n, L);
+
+    /* ================= 3. luminance field =================================
+       Everything about how BRIGHT the body is lives here, and nothing else
+       is allowed to touch it.  The body must stay well under the wall so the
+       beams read as incandescent: Y sits around 0.012 - 0.09 linear.       */
+    float shade = 0.5 + 0.5*ndl;
+    float tilt  = 0.5 - 0.5*dot(normalize(q + vec2(1e-4)), normalize(vec2(0.60,0.80)))*rr;
+    float lift  = smoothstep(0.04, 0.96, shade*0.45 + tilt*0.55);
+
+    float Y = mix(0.0072, 0.0555, lift);
+
+    // broad sheet band: the soft return a curved film throws back at the key
+    float sheetT = dot(q - vec2(-0.10, -0.22), normalize(vec2(0.62, -0.78)));
+    float sheet  = exp(-sheetT*sheetT*2.4);
+    // broken up by the sweep field, otherwise it reads as an airbrushed smear
+    sheet *= 0.62 + 0.76*s1;
+    float lit    = 0.30 + 0.70*smoothstep(0.05, 0.90, shade);
+    Y += 0.0125*sheet*lit;
+
+    // interference bands are not perfectly flat in value either - but only a
+    // gentle ripple, so the structure stays a hue phenomenon
+    Y *= 0.90 + 0.22*s1 + 0.10*s2;
+
+    /* Grazing Fresnel, but only where the rim actually faces the key: in the
+       reference the edge lights up along the top-left and stays dark, even
+       slightly vignetted, everywhere else.                                  */
+    float rimFace = 0.5 + 0.5*dot(normalize(q + vec2(1e-5)), normalize(vec2(-0.55,-0.83)));
+    Y += 0.036*pow(rr, 7.0)*(0.14 + 0.86*rimFace*rimFace);
+    Y *= 1.0 - 0.17*smoothstep(0.72, 1.0, r)*(1.0 - rimFace);
+
+    // multiplicative micro detail: cannot lift the blacks
+    // one pixel measured in q units: the finest two octaves fade out before
+    // they can ever reach Nyquist, however small the disc is drawn
+    float pxq = px/max(uDisc.z, 1e-4);
+    float micro = vnoise(q*19.0)*0.55
+                + vnoise(q*44.0)*0.30*(1.0 - smoothstep(0.40, 0.60, 44.0*pxq));
+    float grain = (vnoise(vec2(dot(q,e2)*86.0, dot(q,e1)*23.0)) - 0.5)
+                * (1.0 - smoothstep(0.40, 0.60, 86.0*pxq));
+    Y *= (0.94 + 0.12*micro) * (1.0 + 0.05*grain);
+
+    // the sheet turns away toward the lower right
+    Y *= mix(0.71, 1.10, smoothstep(0.05, 0.92, tilt));
+
+    /* ================= 4. hue / chroma field ==============================
+       A thin-film phase field, in radians.  One 2*PI of phase is one fringe
+       order.  Coefficients are chosen for ~3 orders across the disc, i.e.
+       bands hundreds of pixels wide: broad sweeps, never stripes.          */
+    float ph = 7.8*dot(qw, e1)                        // wedge-shaped film ramp
+             + 3.5*dot(qw, f1)                        // second, weaker ramp
+             + 4.5*(s1 - 0.5)*2.0                     // warped primary sweeps
+             + 2.6*(s2 - 0.5)*2.0                     // crossing sweeps
+             + 1.3*(s3 - 0.5)*2.0                     // large mottle
+             + 4.2*pow(rr, 4.5)                       // film thins at the rim
+             // creases: the sheet is tensioned on a round frame, so a few soft
+             // folds run out from the middle and bend every band as they go
+             + 1.15*sin(atan(qw.y, qw.x)*2.0 + 1.7)*smoothstep(0.04, 0.60, r)
+             // the film crowds against the frame: a few tight orders hug every
+             // polished edge, arc and cut face alike
+             + 3.0*exp(-(max(0.0,-d)/uDisc.z)*7.0)
+             + 0.35*(vnoise(vec2(dot(q,e1)*21.0, dot(q,e2)*8.0)) - 0.5);
+
+    float fr = sin(ph);                               // -1 teal .. +1 violet
+    // shaped so the hue rests near royal blue and only the fringe peaks make
+    // the long excursions out to teal and violet
+    float frs = 0.34*fr + 0.66*fr*fr*fr;
+    // the teal side of the swing is held shorter: too much of it and the body
+    // turns slate-green instead of reading as a blue dichroic
+    frs *= (frs < 0.0) ? 0.74 : 1.0;
+    // faint higher orders: the silky sub-fringes a real film shows between
+    // its broad sweeps.  Both are far coarser than a pixel.
+    frs += 0.105*sin(ph*2.7 + 2.0) + 0.055*sin(ph*4.3 - 0.6);
+
+    /* The fringe order also drifts slowly across the sheet: the upper-left
+       runs blue-teal, the lower-right crowds into indigo and violet.        */
+    float drift = dot(q, normalize(vec2(0.55, 0.84)));       // -1 .. +1
+
+    /* ---- position along the dichroic arc, in palette-stop units ---- */
+    float u = 2.45
+            + 2.45*frs
+            + 0.45*sin(2.0*ph + 1.30)
+            + 0.80*drift
+            + 0.75*smoothstep(0.58, 1.00, r)          // violet crowds the rim
+            - 0.20*sheet;                             // sheet band leans teal
+    u = clamp(u, 0.0, 5.6);
+
+    /* ---- the palette, sampled straight off the reference ----------------
+       Seven stops across teal -> azure -> royal blue -> indigo -> violet ->
+       magenta.  Each stop is the reference's own median chroma for that hue,
+       scaled by that hue's own median brightness relative to royal blue - so
+       the cyan orders come in bright and the indigo troughs come in dark,
+       exactly as a real reflectance curve does.  The weighted mean gain over
+       the whole disc is ~1, so none of this changes the exposure.          */
+    vec3 K0 = vec3(0.10, 2.19, 3.80);   // 195  teal      (x1.90)
+    vec3 K1 = vec3(0.13, 1.75, 5.88);   // 212  azure     (x1.70)
+    vec3 K2 = vec3(0.26, 0.77, 5.50);   // 228  royal     (x1.00)
+    vec3 K3 = vec3(0.41, 0.41, 4.16);   // 243  indigo    (x0.68)
+    vec3 K4 = vec3(1.41, 0.70, 4.82);   // 258  violet    (x1.15)
+    vec3 K5 = vec3(3.06, 0.41, 7.02);   // 272  purple    (x1.45)
+    vec3 K6 = vec3(4.13, 0.24, 6.21);   // 288  magenta   (x1.50)
+    vec3 pal = mix(K0, K1, clamp(u,       0.0, 1.0));
+    pal = mix(pal, K2, clamp(u - 1.0, 0.0, 1.0));
+    pal = mix(pal, K3, clamp(u - 2.0, 0.0, 1.0));
+    pal = mix(pal, K4, clamp(u - 3.0, 0.0, 1.0));
+    pal = mix(pal, K5, clamp(u - 4.0, 0.0, 1.0));
+    pal = mix(pal, K6, clamp(u - 5.0, 0.0, 1.0));
+
+    vec3 base = Y * pal;
+
+    // where the film returns a broad white sheet it desaturates a little
+    base = mix(base, vec3(dot(base, vec3(0.2126,0.7152,0.0722)))*vec3(0.72,0.96,1.55),
+               0.075*sheet*lit);
+
+    /* ================= 5. light on top of the material ==================== */
+    vec3  H = normalize(L + V);
+    float ndh = max(dot(n, H), 0.0);
+    base += vec3(0.020, 0.045, 0.140) * pow(ndh,  6.0) * 0.16;
+    base += vec3(0.090, 0.170, 0.420) * pow(ndh, 34.0) * 0.26;
+
+    /* ---- polished edges: bright thin line, oriented to the key light ---- */
+    float ee = px*1.4;
+    vec2  gN = vec2(
+      sdDisc(P + vec2(ee,0.0), uDisc.xy, uDisc.z, uWedge.x, uWedge.y)
+    - sdDisc(P - vec2(ee,0.0), uDisc.xy, uDisc.z, uWedge.x, uWedge.y),
+      sdDisc(P + vec2(0.0,ee), uDisc.xy, uDisc.z, uWedge.x, uWedge.y)
+    - sdDisc(P - vec2(0.0,ee), uDisc.xy, uDisc.z, uWedge.x, uWedge.y));
+    gN = normalize(gN + vec2(1e-7, 1e-7));
+    vec2  kl  = normalize(vec2(-0.52, -0.85));      // key light, screen space
+    float fac = max(dot(gN, kl), 0.0);
+
+    float din  = max(0.0, -d);
+    float band = exp(-din/(px*1.15));
+    float core = exp(-din/(px*0.50));
+    vec3 edgeC = vec3(0.30, 0.48, 0.95);
+    base += edgeC * band * (0.060 + 0.80*pow(fac, 1.4));
+    base += vec3(0.85, 0.92, 1.05) * core * 1.35 * pow(fac, 2.6);
+
+    // thin bevel shade just inboard of the highlight -> reads as real thickness
+    float bev = smoothstep(px*1.0, px*2.4, din) * (1.0 - smoothstep(px*2.4, px*5.0, din));
+    base *= 1.0 - 0.30*bev;
+
+    // hover affordance
+    base += vec3(0.28, 0.44, 0.72) * band * uHover * 0.50;
+
+    col = mix(col, base, mask);
+  }
+//#ENDREGION DISC
+
+  //#REGION EMITTER
+/* ---------------- emitter housings ----------------
+   Small machined-aluminium boxes bolted to the wall, seen very slightly from
+   above-left, lit by the same key as the wall and the disc shadow.  The metal
+   is deliberately dim -- front face ~0.150 linear, lit chamfer ~0.26, the
+   shaded side ~0.036 -- so the hardware never competes with the beams.  The
+   only bright thing is the pupil, which sits at the bottom of a bore drilled
+   along the beam axis, exactly at the ray origin (0.030 world units ahead of
+   the emitter centre).  The housing itself is only *partly* turned with the
+   aim, the way a real fixture on an adjustable mount would be, so the boxes
+   stay squarely on the wall; the bore is drilled along the true optical axis. */
+  {
+    vec2  EMB = vec2(0.0290, 0.0250);          // body half-extents, world units
+    float EMR = 0.0038;                        // corner radius
+    vec2  Lw  = normalize(vec2(-0.60,-0.80));  // toward the key, world, y-down
+
+    for (int i=0;i<8;i++){
+      if (i >= uNE) break;
+      vec4 E = uEm[i];
+      vec2 dw = P - E.xy;
+      if (abs(dw.x) > 0.13 || abs(dw.y) > 0.13) continue;
+
+      float ea = E.z*0.30;                     // housing yaw: damped aim
+      mat2  Rm = rot(-ea);
+      vec2  lp = Rm * dw;                      // housing space, +x roughly the beam
+      vec2  L2 = Rm * Lw;                      // key direction, housing space
+      vec3  L3 = normalize(vec3(L2*0.95, 0.42));  // grazing enough to separate facets
+      vec3  Hh = normalize(L3 + vec3(0.0,0.0,1.0));
+
+      // the optical axis, expressed inside the housing frame
+      float ba   = E.z - ea;
+      vec2  bdir = vec2(cos(ba), sin(ba));
+      vec2  bl   = vec2(dot(lp, bdir), dot(lp, vec2(-bdir.y, bdir.x)));
+
+      float body = sdRound(lp, EMB, EMR);
+
+      /* ---- what the housing throws on the wall: a broad occlusion, a soft
+              offset cast shadow and a tight contact line ------------------- */
+      float sdB    = sdRound(lp - Rm*vec2(0.0140, 0.0190), EMB, EMR);
+      float shWide = 1.0 - smoothstep(-0.014, 0.108, sdB);
+      float shSoft = 1.0 - smoothstep(-0.006, 0.036, sdB);
+      float shCont = 1.0 - smoothstep(-0.0020, 0.0085,
+                       sdRound(lp - Rm*vec2(0.0030,0.0042), EMB, EMR));
+      col *= 1.0 - 0.38*shWide - 0.55*shSoft - 0.48*shCont;
+
+      if (body < px*2.0){
+        float m = 1.0 - smoothstep(-px, px, body);
+
+        /* ---- outward direction of the silhouette ------------------------ */
+        float ee = 0.00055;
+        vec2  g  = vec2(sdRound(lp+vec2(ee,0.0), EMB, EMR) - sdRound(lp-vec2(ee,0.0), EMB, EMR),
+                        sdRound(lp+vec2(0.0,ee), EMB, EMR) - sdRound(lp-vec2(0.0,ee), EMB, EMR));
+        g = normalize(g + vec2(1e-6, 1e-7));
+
+        /* ---- machined chamfer: a FLAT 40 deg facet with two crisp creases,
+                widest along the top, where we look down onto the lid ------- */
+        float cw   = 0.0022 + 0.0040*max(-g.y, 0.0)
+                            + 0.0013*max(-g.x, 0.0)
+                            + 0.0005*max( g.y, 0.0);
+        float din  = -body;
+        float face = smoothstep(cw - px*0.8, cw + px*0.8, din);   // 1 = flat front face
+        vec3  nCh  = normalize(vec3(g*0.6428, 0.7660));
+        vec3  n    = normalize(mix(nCh, vec3(0.0,0.0,1.0), face));
+
+        // the outermost pixel rolls over to grazing: a deburred edge
+        float roll = clamp(1.0 - din/(px*1.8), 0.0, 1.0);
+        vec3  nR   = normalize(vec3(g*0.9952, 0.0980));
+        n = normalize(mix(n, nR, roll*roll));
+
+        /* ---- brushed aluminium: fine streaks running along the x axis ---- */
+        float br  = fbm(vec2(lp.x*44.0, lp.y*1400.0));
+        float br2 = vnoise(vec2(lp.x*15.0, lp.y*400.0));
+
+        float ndl = max(dot(n, L3), 0.0);
+        float amb = 0.34 + 0.30*n.z + 0.22*max(-n.y, 0.0);
+
+        vec3  alb   = vec3(0.552, 0.572, 0.616);
+        vec3  metal = alb * (0.4700*ndl + 0.1180*amb);
+
+        float nh = max(dot(n, Hh), 0.0);
+        metal += vec3(0.62,0.65,0.73) * pow(nh,  28.0) * 0.40 * (0.55 + 0.75*br);
+        metal += vec3(0.95,0.97,1.06) * pow(nh, 120.0) * 0.30 * (0.50 + 0.80*br);
+
+        // grazing rim: the deburred edge picking up the room, brightest where
+        // it faces the key
+        float fr = pow(1.0 - n.z, 4.0);
+        metal += vec3(0.26,0.275,0.325) * fr
+                 * (0.10 + 1.05*max(dot(normalize(n.xy + vec2(1e-6,1e-7)), L2), 0.0));
+
+        // the broad key falls off across the little box: top-left brightest
+        metal *= 1.0 - 0.26*smoothstep(-EMB.y, EMB.y, lp.y);
+        metal *= 1.0 - 0.10*smoothstep(-EMB.x, EMB.x, lp.x);
+        metal *= 0.940 + 0.120*br2;
+
+        /* ---- a countersunk port on the front face (machined detail) ------ */
+        vec2  pq  = (lp - vec2(-0.0110, -0.0022)) / vec2(1.0, 0.90);
+        float pd  = length(pq) - 0.0058;
+        if (pd < px*2.0){
+          float pm  = 1.0 - smoothstep(-px, px, pd);
+          vec2  pg  = normalize(pq + vec2(1e-6,1e-7));
+          float pin = clamp(-pd/0.0026, 0.0, 1.0);
+          vec3  prt = mix(vec3(0.062,0.065,0.074), vec3(0.0155,0.0166,0.0205), pin);
+          prt += vec3(0.245,0.256,0.285) * max(-dot(pg, L2), 0.0) * (1.0-pin*0.75);
+          metal = mix(metal, prt, pm);
+          // the lit lip of the countersink, on the key side
+          metal += vec3(0.30,0.315,0.355) * smoothstep(px*1.8, 0.0, abs(pd + 0.0009))
+                   * (0.10 + 1.0*max(dot(pg, L2), 0.0));
+        }
+
+        /* ---- the bore, drilled along the optical axis -------------------- */
+        vec2  ap  = bl - vec2(0.0212, 0.0);
+        vec2  apH = vec2(0.0106, 0.0075);
+        float apd = sdRound(ap, apH, 0.0024);
+        if (apd < px*3.0){
+          float apm = 1.0 - smoothstep(-px, px, apd);
+          float bd  = clamp(-apd/0.0032, 0.0, 1.0);
+          vec2  ag  = normalize(ap/apH + vec2(1e-5, 1e-6));
+          vec3  bore = mix(vec3(0.0380,0.0402,0.0465), vec3(0.0075,0.0081,0.0105), bd);
+          bore += vec3(0.130,0.136,0.152) * max(-dot(ag, L2), 0.0) * (1.0-bd)*(1.0-bd);
+          metal = mix(metal, bore, apm);
+          // chamfer where the bore mouth breaks the front face
+          metal += vec3(0.17,0.179,0.202)
+                   * smoothstep(px*1.5, 0.0, abs(apd + 0.0008))
+                   * (0.06 + 1.05*max(dot(ag, L2), 0.0));
+        }
+
+        /* ---- the emitting pupil, exactly at the ray origin --------------- */
+        float pr = length(bl - vec2(0.0300, 0.0));
+        metal += vec3(0.30,0.313,0.345) * 0.45 * exp(-pr/0.0105);
+        metal  = mix(metal, vec3(0.85,0.86,0.92), smoothstep(0.0038, 0.0021, pr));
+        metal += vec3(1.00,0.985,0.955) * 2.2 * exp(-(pr*pr)/(0.0021*0.0021));
+
+        /* The housings were graded to stay out of the beams' way, but measured
+           against the reference they came out ~1.6x too dark (body median 0.139
+           vs 0.223), which cost all the machining detail. Lift the diffuse
+           response without touching the specular structure. */
+        metal *= 1.62;
+
+        // hover affordance
+        float ol = 1.0 - smoothstep(0.0, px*2.0, abs(body));
+        metal += vec3(0.28,0.48,0.85) * ol * uHoverEm.y * 0.85
+                 * step(abs(float(i) - uHoverEm.x), 0.5);
+
+        col = mix(col, metal, m);
+      }
+    }
+  }
+//#ENDREGION EMITTER
+
+  fragColor = vec4(max(col, 0.0), 1.0);
+}`.replace(/TAUC/g, '6.28318530718');
+
+/* ============================== BEAM PASS ================================= */
+const VS_BEAM = `#version 300 es
+layout(location=0) in vec2 aCorner;      // unit quad -1..1
+layout(location=1) in vec4 aSeg;         // ax ay bx by (world)
+layout(location=2) in vec4 aCol;         // rgb, power
+layout(location=3) in vec4 aExtra;       // x: path length from the emitter, y: inside
+
+uniform vec2 uRes;
+uniform float uH;
+uniform float uWidth;                    // world half-width of the glow
+uniform vec2 uJitter;
+uniform float uRefPower;                 // power of an unattenuated root ray
+uniform float uDiv;                      // beam divergence per world unit of path
+uniform vec2 uOff;
+
+out vec2 vLocal;                         // x: along (0..len), y: perpendicular
+out vec4 vCol;
+out float vLen;
+out float vWidth;                        // this instance's actual half-width
+out float vInside;                       // 1 if this segment is inside the glass
+out float vSpread;                       // divergence widening factor
+
+void main(){
+  vec2 A = aSeg.xy, B = aSeg.zw;
+  vec2 dir = B - A;
+  float len = length(dir);
+  if (len < 1e-7) dir = vec2(1.0,0.0); else dir /= len;
+  vec2 nrm = vec2(-dir.y, dir.x);
+
+  /* A real beam diverges. Its width grows with the distance travelled and its
+     irradiance falls in proportion, conserving flux — which is what makes the
+     exit fan fade out inside the frame instead of leaving it at full power. */
+  vSpread = 1.0 + aExtra.x * uDiv;
+  float pw = aCol.a / vSpread;
+  vInside = aExtra.y;
+  // guided light needs a wider quad to hold its scattered sheath
+  float w = uWidth * clamp(pow(pw/uRefPower, 0.25), 0.14, 1.0)
+          * mix(1.0, 2.8, vInside) * sqrt(vSpread);
+  vWidth = w;
+  vec2 mid = (A+B)*0.5;
+  vec2 pos = mid + dir*(aCorner.x*(len*0.5 + w)) + nrm*(aCorner.y*w);
+
+  vLocal = vec2(aCorner.x*(len*0.5 + w), aCorner.y*w);
+  vLen = len*0.5;
+  vCol = vec4(aCol.rgb, pw);
+
+  vec2 sp = pos*uH + uOff;
+  vec2 clip = vec2(sp.x/uRes.x*2.0 - 1.0, 1.0 - sp.y/uRes.y*2.0);
+  gl_Position = vec4(clip + uJitter/uRes*2.0, 0.0, 1.0);
+}`;
+
+//#REGION BEAM
+const FS_BEAM = `#version 300 es
+precision highp float;
+in vec2 vLocal;
+in vec4 vCol;
+in float vLen;
+in float vWidth;          // this instance's actual quad half-width (world)
+in float vInside;         // 1 where the ray is guided inside the dichroic film
+in float vSpread;         // divergence widening
+out vec4 fragColor;
+uniform float uCore;      // core sigma (world)
+uniform float uRefPower;  // power of an unattenuated root ray
+uniform float uHalo;      // halo scale (world)
+
+void main(){
+  /* --- exact screen footprint of the local beam frame -----------------------
+     length() of the analytic gradient, not fwidth()'s Manhattan norm, so the
+     apparent thickness is identical at 0, 30 and 45 degrees: no stair-stepping,
+     no thick-diagonal/thin-axial tell.                                       */
+  vec2  gx  = vec2(dFdx(vLocal.x), dFdy(vLocal.x));
+  vec2  gy  = vec2(dFdx(vLocal.y), dFdy(vLocal.y));
+  float fwx = max(length(gx), 1e-7);      // world units per pixel along
+  float fwy = max(length(gy), 1e-7);      // world units per pixel across
+
+  /* --- longitudinal coverage ------------------------------------------------
+     A box-filtered end cap centred exactly on the segment endpoint. Because the
+     coverage of two abutting segments sums to 1 and smoothstep(u)+smoothstep(1-u)
+     is also 1, a chain of traced segments joins seamlessly - no beads at the
+     bounce points, no gaps, and the free end of a ray fades over one pixel
+     instead of terminating on a hard edge.                                    */
+  float ax  = abs(vLocal.x) - vLen;
+  float cov = clamp(0.5 - ax/fwx, 0.0, 1.0);
+  float cap = cov*cov*(3.0 - 2.0*cov);
+  if (cap <= 0.0) { fragColor = vec4(0.0); return; }
+
+  float r = abs(vLocal.y);
+
+  /* --- core: pixel-footprint-convolved gaussian, energy preserving ----------
+     The physical core is sub-pixel thin. Rather than point-sampling it (which
+     scintillates) it is convolved with the reconstruction filter and the peak
+     is divided by the widening, so the flux carried by the line is constant
+     however thin it gets. Result: a razor line that never aliases.           */
+  float s0   = uCore * 0.50 * sqrt(vSpread);
+  float sp   = fwy   * 0.42;
+  float se   = sqrt(s0*s0 + sp*sp);
+  float core = 1.55 * (s0/se) * exp(-0.5*(r*r)/(se*se));
+
+  /* --- wings: one tight taper, one faint wide veil --------------------------
+     Deliberately weak. A laser in clean air scatters almost nothing sideways:
+     in the reference the beam falls from peak to wall level inside two pixels
+     and every soft glow you see is lens veiling, added later by the bloom.
+     The wings exist only to carry the spectral hue outward.                  */
+  float hs   = max(uHalo, fwy) * sqrt(vSpread);
+  float wIn  = exp(-r/(hs*0.30));
+  float t    = r/hs;
+  float wOut = 1.0/(1.0 + t*t); wOut *= wOut;
+  float wing = wIn*0.045 + wOut*0.014;
+
+  /* Inside the film the ray is not crossing clean air. The dichroic layer is a
+     turbid stack, so guided light bleeds sideways — that lateral scatter is what
+     paints the broad soft sweeps across the disc, rather than the bare geometric
+     lines a vacuum would give. Energy is taken out of nothing: it is a small
+     fraction of the segment's own power, spread wide and kept dim.           */
+  float scat = exp(-r/(hs*1.9)) + 0.35/(1.0 + pow(r/(hs*2.6), 2.0));
+  wing += scat * 0.030 * vInside;
+
+  /* The quad only extends vWidth past the axis - and vWidth is now shrunk per
+     segment by power^(1/4). The inverse-square skirt is still a fraction of a
+     percent of peak out there and, additively composited over thousands of
+     segments, that residue prints as a faint soft rectangle around every bright
+     beam. Window it to exactly zero at this instance's own border.           */
+  float win = smoothstep(1.0, 0.70, r/max(vWidth, 1e-6));
+  wing *= win;
+  core *= win;
+
+  vec3  spec = vCol.rgb;
+  float pw   = vCol.a;
+
+  /* An over-driven core saturates every channel and reads white; the wings
+     keep the spectral hue. That hue-in-the-wings is what makes a dispersed
+     fan look volumetric instead of like a set of coloured strokes.           */
+  float wht = smoothstep(0.10, 0.85, core*pw/max(uRefPower,1e-9));
+  vec3  cc  = mix(spec, vec3(1.0), wht*0.92);
+
+  vec3 outc = (cc*core + spec*wing) * pw * cap;
+  fragColor = vec4(max(outc, 0.0), 1.0);
+}`;
+
+/* ---------------------------- impact flares (points) ---------------------- */
+//#ENDREGION BEAM
+const VS_HOT = `#version 300 es
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec2 aPos;
+layout(location=2) in vec4 aCol;
+uniform vec2 uRes; uniform float uH; uniform float uSize; uniform vec2 uJitter; uniform vec2 uOff;
+out vec2 vP; out vec4 vC;
+void main(){
+  float s = uSize*(0.6+aCol.a);
+  vec2 pos = aPos + aCorner*s;
+  vP = aCorner; vC = aCol;
+  vec2 sp = pos*uH + uOff;
+  vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
+  gl_Position = vec4(clip - uJitter/uRes*2.0, 0.0, 1.0);
+}`;
+const FS_HOT = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vC; out vec4 fragColor;
+void main(){
+  float d = length(vP);
+  float glow = exp(-d*d*13.0)*0.85 + 1.0/(1.0+d*d*44.0)*0.30;
+  // star spikes
+  float sp = pow(max(0.0,1.0-abs(vP.y)*34.0),3.0)*exp(-abs(vP.x)*2.1)
+           + pow(max(0.0,1.0-abs(vP.x)*34.0),3.0)*exp(-abs(vP.y)*2.1);
+  // the inverse-square tail is still ~4% of peak at the sprite border, which
+  // shows up as a soft rectangle — window it smoothly to zero at the edge
+  float win = smoothstep(1.0, 0.45, d);
+  vec3 c = mix(vC.rgb, vec3(1.0), 0.55);
+  fragColor = vec4(c*(glow + sp*0.80)*vC.a*0.45*win, 1.0);
+}`;
+
+/* ------------------------------ post shaders ------------------------------ */
+//#REGION POST
+const FS_BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uTex; uniform float uThresh; uniform vec2 uTexel;
+
+/* Karis weight: average in a tone-mapped-ish space so a single 200-nit pixel
+   cannot dominate its neighbours. This is what stops the bloom from boiling. */
+float kw(vec3 c){ return 1.0/(1.0 + dot(c, vec3(0.2126,0.7152,0.0722))); }
+
+void main(){
+  /* 5 bilinear taps -> a 4x4 prefilter, Karis-averaged (firefly suppression) */
+  vec3 c0 = texture(uTex, vUV).rgb;
+  vec3 c1 = texture(uTex, vUV + vec2(-1.0,-1.0)*uTexel).rgb;
+  vec3 c2 = texture(uTex, vUV + vec2( 1.0,-1.0)*uTexel).rgb;
+  vec3 c3 = texture(uTex, vUV + vec2(-1.0, 1.0)*uTexel).rgb;
+  vec3 c4 = texture(uTex, vUV + vec2( 1.0, 1.0)*uTexel).rgb;
+
+  float w0 = kw(c0)*0.5, w1 = kw(c1)*0.125, w2 = kw(c2)*0.125,
+        w3 = kw(c3)*0.125, w4 = kw(c4)*0.125;
+  vec3  c  = (c0*w0 + c1*w1 + c2*w2 + c3*w3 + c4*w4) / max(w0+w1+w2+w3+w4, 1e-5);
+
+  /* soft-knee bright pass: a quadratic shoulder around the threshold, so a
+     highlight crossing it fades in instead of popping - no bloom shimmer.   */
+  float l    = max(max(c.r, c.g), c.b);
+  float knee = uThresh*0.75 + 1e-4;
+  float s    = clamp(l - uThresh + knee, 0.0, 2.0*knee);
+  s          = s*s/(4.0*knee);
+  float k    = max(s, l - uThresh) / max(l, 1e-5);
+
+  fragColor = vec4(c*k, 1.0);
+}`;
+
+const FS_DOWN = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uTex; uniform vec2 uTexel;
+vec3 T(vec2 o){ return texture(uTex, vUV+o*uTexel).rgb; }
+void main(){
+  /* 13-tap dual-box (Jimenez / COD:AW). Partition-of-unity weights, so the
+     chain neither gains nor loses energy as it descends.                     */
+  vec3 a = T(vec2(-2,2)), b = T(vec2(0,2)), c = T(vec2(2,2));
+  vec3 d = T(vec2(-2,0)), e = T(vec2(0,0)), f = T(vec2(2,0));
+  vec3 g = T(vec2(-2,-2)), h = T(vec2(0,-2)), i = T(vec2(2,-2));
+  vec3 j = T(vec2(-1,1)), k = T(vec2(1,1)), l = T(vec2(-1,-1)), m = T(vec2(1,-1));
+  vec3 r = e*0.125 + (a+c+g+i)*0.03125 + (b+d+f+h)*0.0625 + (j+k+l+m)*0.125;
+  fragColor = vec4(r, 1.0);
+}`;
+
+const FS_UP = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uTex; uniform vec2 uTexel; uniform float uRad;
+vec3 T(vec2 o){ return texture(uTex, vUV+o*uTexel*uRad*1.5).rgb; }
+void main(){
+  /* 3x3 tent upsample. Summed over the whole chain this is a near-exponential
+     radial falloff - a wide, smooth veiling glare with no visible mip rings.
+     The 1.06 gain compounds once per level, so the coarse (wide) mips end up
+     weighted ~1.35x over the fine ones: the glare gets its energy from radius
+     rather than from amplitude, which is what a real lens veil looks like.  */
+  vec3 r = T(vec2(-1,1))*1.0 + T(vec2(0,1))*2.0 + T(vec2(1,1))*1.0
+         + T(vec2(-1,0))*2.0 + T(vec2(0,0))*4.0 + T(vec2(1,0))*2.0
+         + T(vec2(-1,-1))*1.0 + T(vec2(0,-1))*2.0 + T(vec2(1,-1))*1.0;
+  fragColor = vec4(r*(1.06/16.0), 1.0);
+}`;
+
+const FS_STREAK = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uTex; uniform vec2 uDir; uniform float uAtten;
+void main(){
+  /* Anamorphic tail: a gaussian core with an exponential skirt, and a tail
+     that drifts cold - the signature of a cylindrical front element. Weights
+     are normalised so the pass preserves peak level, not adds to it.        */
+  vec3 s = vec3(0.0); vec3 wsum = vec3(0.0);
+  for(int i=-24;i<=24;i++){
+    float fi = float(i);
+    float af = abs(fi);
+    float w  = exp(-fi*fi*0.010) + 0.55*exp(-af*0.20);
+    vec3  tn = mix(vec3(1.0), vec3(0.62,0.80,1.28), clamp(af/24.0, 0.0, 1.0));
+    vec3  ww = w*tn;
+    s    += texture(uTex, vUV + uDir*fi).rgb * ww;
+    wsum += ww;
+  }
+  fragColor = vec4(s/max(wsum, vec3(1e-5)), 1.0);
+}`;
+
+const FS_COMP = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uScene, uBloom, uStreak;
+uniform float uExposure, uBloomK, uStreakK, uGrain, uTime;
+uniform vec2 uRes;
+${GLSL_NOISE}
+
+/* ----------------------------- ACES (Hill fit) ---------------------------- */
+const mat3 ACESIn = mat3(
+  0.59719, 0.07600, 0.02840,
+  0.35458, 0.90834, 0.13383,
+  0.04823, 0.01566, 0.83777);
+const mat3 ACESOut = mat3(
+   1.60475, -0.10208, -0.00327,
+  -0.53108,  1.10813, -0.07276,
+  -0.07367, -0.00605,  1.07602);
+vec3 rrt(vec3 v){
+  vec3 a = v*(v + 0.0245786) - 0.000090537;
+  vec3 b = v*(0.983729*v + 0.4329510) + 0.238081;
+  return a/b;
+}
+vec3 aces(vec3 c){
+  c = ACESIn*max(c, 0.0);
+  c = rrt(c);
+  c = ACESOut*c;
+  return clamp(c, 0.0, 1.0);
+}
+
+float luma(vec3 c){ return dot(c, vec3(0.2126,0.7152,0.0722)); }
+
+void main(){
+  vec2 uv = vUV;
+  vec2 d  = uv - 0.5;
+  vec2 da = d*vec2(uRes.x/max(uRes.y,1.0), 1.0);
+  float r2 = dot(da,da) / 1.0400;          // 0 centre, ~1 at the corners (16:9)
+
+  /* --- transverse chromatic aberration, zero on axis, grows with field --- */
+  float ca = 0.0022*r2*r2 + 0.0008*r2;
+  vec3 sc, bl;
+  sc.r = texture(uScene, uv - d*ca).r;
+  sc.g = texture(uScene, uv).g;
+  sc.b = texture(uScene, uv + d*ca).b;
+  bl.r = texture(uBloom, uv + d*ca*1.6).r;
+  bl.g = texture(uBloom, uv).g;
+  bl.b = texture(uBloom, uv - d*ca*1.6).b;
+  vec3 st = texture(uStreak, uv).rgb;
+
+  /* --- scene light + veiling glare + anamorphic tail -------------------- */
+  vec3 c = sc + bl*(uBloomK*0.20) + st*(uStreakK*0.11);
+
+  /* --- optical vignette: applied to the LIGHT, before the film ----------- */
+  float vig = 1.0 - 0.40*pow(clamp(r2,0.0,1.6), 1.30);
+  c *= max(vig, 0.0);
+
+  /* --- film ------------------------------------------------------------- */
+  c *= uExposure;
+  /* long shoulder ahead of the RRT: holds the upper mids down so only the
+     genuinely incandescent cores climb into the top of the range           */
+  c  = c/(1.0 + c*0.060);
+  c  = aces(c);
+
+  /* --- grade: cool, dense shadows; neutral mids; clean highlights -------- */
+  float L = luma(c);
+  float sh = 1.0 - smoothstep(0.0, 0.34, L);          // shadow mask
+  c *= mix(vec3(1.0), vec3(0.932, 0.982, 1.105), sh*0.85);
+
+  /* black floor: lift, never subtract. Nothing in a photographed gallery is
+     code 0 - the blacks stay dense and cool but keep their separation.      */
+  const vec3 flr = vec3(0.0036, 0.0041, 0.0056);
+  c = flr + c*(1.0 - flr);
+
+  /* --- encode to display space FIRST -------------------------------------- */
+  c = clamp(c, 0.0, 1.0);
+  vec3 srgb = mix(c*12.92, 1.055*pow(max(c,1e-5), vec3(1.0/2.4)) - 0.055,
+                  step(vec3(0.0031308), c));
+
+  /* --- grain: triangular PDF, constant amplitude in DISPLAY space ---------
+     Film grain is a property of the emulsion, not of the exposure, so its
+     amplitude is flat across the tonal range — measured off the reference it
+     holds ~0.85 code std from the deepest corner to the lit wall. Adding it in
+     linear light instead (as this did) is amplified enormously by the encode's
+     steep toe, which made the shadows crawl at 5x the highlights.           */
+  float t1 = fract(uTime*13.0), t2 = fract(uTime*7.0 + 0.37);
+  float g1 = hash21(gl_FragCoord.xy + vec2(t1*311.7, t2*197.3));
+  float g2 = hash21(gl_FragCoord.xy*1.31 + vec2(t2*419.1, t1*271.9));
+  float gn = g1 + g2 - 1.0;                       // triangular PDF, std = 1/sqrt(6)
+  srgb += gn * uGrain * 0.0117;
+
+  /* --- TPDF dither ------------------------------------------------------- */
+  float d1 = hash21(gl_FragCoord.xy + 17.13);
+  float d2 = hash21(gl_FragCoord.xy*0.77 + 91.7);
+  srgb += (d1 - d2)/255.0;
+
+  fragColor = vec4(clamp(srgb, 0.0, 1.0), 1.0);
+}`;
+//#ENDREGION POST
+/* Progressive accumulation: a running mean of sub-pixel-jittered frames.
+   After ~32 samples a still frame is effectively supersampled, which is what
+   keeps hair-thin beams and SDF edges free of stair-stepping. */
+const FS_ACCUM = `#version 300 es
+precision highp float;
+in vec2 vUV; out vec4 fragColor;
+uniform sampler2D uPrev, uCur;
+uniform float uW;                 // weight of the new sample = 1/(n+1)
+void main(){
+  vec3 prev = texture(uPrev, vUV).rgb;
+  vec3 cur  = texture(uCur , vUV).rgb;
+  fragColor = vec4(mix(prev, cur, uW), 1.0);
+}`;
+
+/* --------------------------------- programs ------------------------------- */
+const pEnv   = prog(VS_FULL, FS_ENV);
+const pBeam  = prog(VS_BEAM, FS_BEAM);
+const pHot   = prog(VS_HOT, FS_HOT);
+const pBright= prog(VS_FULL, FS_BRIGHT);
+const pDown  = prog(VS_FULL, FS_DOWN);
+const pUp    = prog(VS_FULL, FS_UP);
+const pStreak= prog(VS_FULL, FS_STREAK);
+const pComp  = prog(VS_FULL, FS_COMP);
+const pAccum = prog(VS_FULL, FS_ACCUM);
+
+/* ------------------------------- geometry buf ----------------------------- */
+const quadBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+
+const segBuf = gl.createBuffer();
+const hotBuf = gl.createBuffer();
+const vaoBeam = gl.createVertexArray();
+gl.bindVertexArray(vaoBeam);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, segBuf);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 48, 0);  gl.vertexAttribDivisor(1, 1);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 48, 16); gl.vertexAttribDivisor(2, 1);
+gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 48, 32); gl.vertexAttribDivisor(3, 1);
+gl.bindVertexArray(null);
+
+const vaoHot = gl.createVertexArray();
+gl.bindVertexArray(vaoHot);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, hotBuf);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 0);  gl.vertexAttribDivisor(1, 1);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 24, 8);  gl.vertexAttribDivisor(2, 1);
+gl.bindVertexArray(null);
+
+const vaoEmpty = gl.createVertexArray();
+
+/* --------------------------------- targets -------------------------------- */
+let W = 0, H = 0, DPR = 1;
+/* The scene is authored in a canonical 16:9 design space (x 0..16/9, y 0..1) and
+   fitted into whatever viewport we get, so the composition survives ultrawide,
+   portrait and square without anything sliding out of frame. */
+const VIEW_W = 16 / 9, VIEW_H = 1;
+let viewScale = 1, viewOffX = 0, viewOffY = 0;
+/* On narrow screens the control panel becomes a bottom sheet that covers the
+   lower half of the viewport. Fitting the scene to the *whole* viewport would
+   then hide half the artwork behind it, so the fit targets the visible area. */
+function bottomInsetPx() {
+  const p = document.querySelector('.panel');
+  if (!p) return 0;
+  const r = p.getBoundingClientRect();
+  const isSheet = r.width > innerWidth * 0.8 && r.top > innerHeight * 0.35;
+  return isSheet ? Math.max(0, innerHeight - r.top) : 0;
+}
+function updateView() {
+  const availH = Math.max(80 * DPR, H - bottomInsetPx() * DPR);
+  viewScale = Math.min(W / VIEW_W, availH / VIEW_H);
+  viewOffX = (W - VIEW_W * viewScale) * 0.5;
+  viewOffY = (availH - VIEW_H * viewScale) * 0.5;
+}
+let fboScene = null, mips = [], fboStreakA = null, fboStreakB = null;
+let fboAcc = [null, null], accIdx = 0, accN = 0;
+
+function allocTargets(w, h) {
+  const del = f => { if (f) { gl.deleteTexture(f.tex); gl.deleteFramebuffer(f.fb); } };
+  del(fboScene); mips.forEach(del); del(fboStreakA); del(fboStreakB);
+  fboAcc.forEach(del);
+  mips = [];
+  fboScene = makeFBO(w, h, HDR_FMT, HDR_TYPE);
+  fboAcc = [makeFBO(w, h, HDR_FMT, HDR_TYPE), makeFBO(w, h, HDR_FMT, HDR_TYPE)];
+  accN = 0;
+  let mw = Math.max(1, w >> 1), mh = Math.max(1, h >> 1);
+  for (let i = 0; i < 6; i++) {
+    mips.push(makeFBO(mw, mh, HDR_FMT, HDR_TYPE));
+    mw = Math.max(1, mw >> 1); mh = Math.max(1, mh >> 1);
+    if (mw < 4 || mh < 4) break;
+  }
+  fboStreakA = makeFBO(Math.max(1, w >> 2), Math.max(1, h >> 2), HDR_FMT, HDR_TYPE);
+  fboStreakB = makeFBO(Math.max(1, w >> 2), Math.max(1, h >> 2), HDR_FMT, HDR_TYPE);
+}
+
+let exporting = false;
+function resize() {
+  if (exporting) return;
+  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(2, Math.round(canvas.clientWidth * DPR));
+  const h = Math.max(2, Math.round(canvas.clientHeight * DPR));
+  if (w === W && h === H) return;
+  W = w; H = h;
+  canvas.width = W; canvas.height = H;
+  updateView();
+  allocTargets(W, H);
+  dirty = true;
+}
+
+function blit(p, target, setup) {
+  gl.bindFramebuffer(gl.FRAMEBUFFER, target ? target.fb : null);
+  gl.viewport(0, 0, target ? target.w : W, target ? target.h : H);
+  gl.useProgram(p.p);
+  if (setup) setup(p.u);
+  gl.bindVertexArray(vaoEmpty);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+function bindTex(loc, tex, unit) {
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.uniform1i(loc, unit);
+}
+
+/* --------------------------------- state ---------------------------------- */
+let dirty = true;
+let time = 0;
+/* --- progressive supersampling ------------------------------------------- */
+const ACC_MAX = 48;
+function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = (i / b) | 0; } return r; }
+function resetAccum() { accN = 0; }
+if (scene.subRays === undefined) scene.subRays = 1;
+if (scene.waist === undefined) scene.waist = 0.0035;
+let hoverDisc = 0, hoverEm = -1, lastHoverDisc = 0, lastHoverEm = -1;
+
+const emitUni = new Float32Array(32);
+
+function render(dt) {
+  const aspect = W / H;
+  time += dt;
+
+  if (scene.spin) { scene.disc.wdir += dt * 0.22; dirty = true; }
+  if (hoverDisc !== lastHoverDisc || hoverEm !== lastHoverEm) { lastHoverDisc = hoverDisc; lastHoverEm = hoverEm; resetAccum(); }
+  if (dirty) { trace(); dirty = false; uploadSegs(); resetAccum(); }
+
+  /* ---- 1. environment ---- */
+  for (let i = 0; i < 8; i++) {
+    const e = scene.emitters[i] || { x: 0, y: 0, a: 0 };
+    emitUni[i * 4] = e.x; emitUni[i * 4 + 1] = e.y; emitUni[i * 4 + 2] = e.a;
+    emitUni[i * 4 + 3] = 1;
+  }
+  const jx = halton(accN + 1, 2) - 0.5;
+  const jy = halton(accN + 1, 3) - 0.5;
+
+  blit(pEnv, fboScene, u => {
+    gl.uniform2f(u.uJitter, jx, jy);
+    gl.uniform2f(u.uRes, W, H);
+    gl.uniform1f(u.uH, viewScale);
+    gl.uniform2f(u.uOff, viewOffX, viewOffY);
+    gl.uniform1f(u.uTime, time);
+    gl.uniform3f(u.uDisc, scene.disc.x, scene.disc.y, scene.disc.r);
+    gl.uniform2f(u.uWedge, scene.disc.wdir, scene.disc.whalf);
+    gl.uniform1i(u.uNE, scene.nEmit);
+    gl.uniform4fv(u.uEm, emitUni);
+    gl.uniform1f(u.uHover, hoverDisc);
+    gl.uniform2f(u.uHoverEm, hoverEm, 1);
+  });
+
+  /* ---- 2. beams (additive) ---- */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
+  gl.viewport(0, 0, W, H);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+
+  const wBase = 0.0016 * scene.beamW;
+  gl.useProgram(pBeam.p);
+  gl.uniform2f(pBeam.u.uRes, W, H);
+  gl.uniform1f(pBeam.u.uH, viewScale);
+  gl.uniform2f(pBeam.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(pBeam.u.uJitter, jx, jy);
+  gl.uniform1f(pBeam.u.uWidth, wBase * 6.0);
+  gl.uniform1f(pBeam.u.uRefPower, traceRefPower);
+  gl.uniform1f(pBeam.u.uDiv, 1.9);
+  gl.uniform1f(pBeam.u.uCore, wBase * 0.62);
+  gl.uniform1f(pBeam.u.uHalo, wBase * 3.0);
+  gl.bindVertexArray(vaoBeam);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, segCount);
+
+  gl.useProgram(pHot.p);
+  gl.uniform2f(pHot.u.uRes, W, H);
+  gl.uniform1f(pHot.u.uH, viewScale);
+  gl.uniform2f(pHot.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(pHot.u.uJitter, jx, jy);
+  gl.uniform1f(pHot.u.uSize, 0.0090 * scene.beamW);
+  gl.bindVertexArray(vaoHot);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, hotCount);
+
+  gl.disable(gl.BLEND);
+  gl.bindVertexArray(null);
+
+  /* ---- 2b. accumulate into the running mean ---- */
+  const src = fboAcc[accIdx ^ 1];
+  blit(pAccum, src, u => {
+    bindTex(u.uPrev, fboAcc[accIdx].tex, 0);
+    bindTex(u.uCur, fboScene.tex, 1);
+    gl.uniform1f(u.uW, accN === 0 ? 1.0 : 1.0 / (accN + 1));
+  });
+  accIdx ^= 1;
+  accN++;
+
+  /* ---- 3. bloom chain ---- */
+  blit(pBright, mips[0], u => {
+    bindTex(u.uTex, src.tex, 0);
+    gl.uniform1f(u.uThresh, 0.90);
+    gl.uniform2f(u.uTexel, 1 / W, 1 / H);
+  });
+  for (let i = 1; i < mips.length; i++) {
+    blit(pDown, mips[i], u => {
+      bindTex(u.uTex, mips[i - 1].tex, 0);
+      gl.uniform2f(u.uTexel, 1 / mips[i - 1].w, 1 / mips[i - 1].h);
+    });
+  }
+  // upsample & accumulate back down the chain
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.ONE, gl.ONE);
+  for (let i = mips.length - 1; i > 0; i--) {
+    blit(pUp, mips[i - 1], u => {
+      bindTex(u.uTex, mips[i].tex, 0);
+      gl.uniform2f(u.uTexel, 1 / mips[i].w, 1 / mips[i].h);
+      gl.uniform1f(u.uRad, 1.15);
+    });
+  }
+  gl.disable(gl.BLEND);
+
+  /* ---- 4. anamorphic streak ---- */
+  blit(pStreak, fboStreakA, u => {
+    bindTex(u.uTex, mips[1] ? mips[1].tex : mips[0].tex, 0);
+    gl.uniform2f(u.uDir, 1.6 / fboStreakA.w, 0);
+  });
+  blit(pStreak, fboStreakB, u => {
+    bindTex(u.uTex, fboStreakA.tex, 0);
+    gl.uniform2f(u.uDir, 4.5 / fboStreakB.w, 0);
+  });
+
+  /* ---- 5. composite ---- */
+  blit(pComp, null, u => {
+    bindTex(u.uScene, src.tex, 0);
+    bindTex(u.uBloom, mips[0].tex, 1);
+    bindTex(u.uStreak, fboStreakB.tex, 2);
+    gl.uniform1f(u.uExposure, exposure);
+    gl.uniform1f(u.uBloomK, bloomK);
+    gl.uniform1f(u.uStreakK, streakK);
+    gl.uniform1f(u.uGrain, grainK);
+    gl.uniform1f(u.uTime, time);
+    gl.uniform2f(u.uRes, W, H);
+  });
+}
+
+function uploadSegs() {
+  gl.bindBuffer(gl.ARRAY_BUFFER, segBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, segData.subarray(0, segCount * 12), gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, hotBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, hotData.subarray(0, hotCount * 6), gl.DYNAMIC_DRAW);
+}
+
+//#REGION INTERACT
+/* =========================================================================== */
+/*                                INTERACTION                                  */
+/*  Direct manipulation (drag / handles / wheel / keys)  +  panel wiring.       */
+/* =========================================================================== */
+let exposure = 1.13, bloomK = 0.9, streakK = 0.42, grainK = 0.7;
+
+const $ = id => document.getElementById(id);
+const uiEl   = $('ui');
+const panel  = $('panel');
+const gizEl  = $('giz');
+const hudEl  = $('hud');
+
+/* The scene is fitted into a canonical 16:9 design space (see updateView), so
+   every screen<->world conversion goes through viewScale / viewOff.           */
+function viewXf() {
+  const r = canvas.getBoundingClientRect();
+  return { s: viewScale / DPR, ox: r.left + viewOffX / DPR, oy: r.top + viewOffY / DPR };
+}
+/* client coords -> world units (1.0 = design-space height, y down) */
+function toWorld(ev) {
+  const v = viewXf();
+  return { x: (ev.clientX - v.ox) / v.s, y: (ev.clientY - v.oy) / v.s };
+}
+
+/* ------------------------------------------------------------ scrub readout */
+let hudTimer = 0;
+function say(unit, value) {
+  hudEl.innerHTML = '<span class="u">' + unit + '</span>' + value;
+  hudEl.classList.add('on');
+  clearTimeout(hudTimer);
+  hudTimer = setTimeout(() => hudEl.classList.remove('on'), 1100);
+}
+const deg = rad => (rad * 180 / Math.PI).toFixed(1) + '°';
+
+/* ========================================================================== */
+/*  Scene gizmos — real, always-visible handles laid over the canvas.          */
+/*  aim(i)  rotate emitter i    jawA/jawB  open/close the mouth               */
+/*  size    disc radius         (the rim band itself rotates the disc)         */
+/* ========================================================================== */
+const SVGNS = 'http://www.w3.org/2000/svg';
+const arcs = document.createElementNS(SVGNS, 'svg');
+arcs.setAttribute('class', 'arcs');
+gizEl.appendChild(arcs);
+function mkPath(cls) {
+  const p = document.createElementNS(SVGNS, 'path');
+  p.setAttribute('class', cls);
+  arcs.appendChild(p);
+  return p;
+}
+/** arc of `radius` about (cx,cy) spanning a0..a1 (screen radians, y down) */
+function arcD(cx, cy, radius, a0, a1) {
+  const x0 = cx + Math.cos(a0) * radius, y0 = cy + Math.sin(a0) * radius;
+  const x1 = cx + Math.cos(a1) * radius, y1 = cy + Math.sin(a1) * radius;
+  const large = Math.abs(a1 - a0) > Math.PI ? 1 : 0;
+  const sweep = a1 > a0 ? 1 : 0;
+  return 'M' + x0.toFixed(1) + ' ' + y0.toFixed(1) + 'A' + radius.toFixed(1) + ' ' + radius.toFixed(1) +
+         ' 0 ' + large + ' ' + sweep + ' ' + x1.toFixed(1) + ' ' + y1.toFixed(1);
+}
+
+function mkHandle(cls, label, title) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'hnd ' + cls;
+  b.setAttribute('aria-label', label);
+  b.title = title;
+  b.innerHTML = '<i></i>';
+  gizEl.appendChild(b);
+  return b;
+}
+/* one protractor arc + knob per possible emitter.  Each arc is drawn twice —
+   a dark backing stroke under a bright stroke — so it survives on top of the
+   blown-out beam it necessarily overlaps. */
+const aimG = [];
+const backs = [], tops = [];
+for (let i = 0; i < 10; i++) backs.push(mkPath('g'));     // all dark strokes first
+for (let i = 0; i < 8; i++) tops.push(mkPath('a'));
+const mouthArc = mkPath('a dash'), tickArc = mkPath('a');
+for (let i = 0; i < 8; i++) {
+  const hnd = mkHandle('aim', 'Emitter ' + (i + 1) + ' aim angle', 'Drag to aim emitter ' + (i + 1));
+  hnd.dataset.k = 'aim'; hnd.dataset.i = String(i);
+  aimG.push({ back: backs[i], arc: tops[i], hnd });
+}
+const mouthBack = backs[8], tickBack = backs[9];
+mouthBack.setAttribute('class', 'g dash');
+const jawA = mkHandle('jaw', 'Mouth opening, upper face', 'Drag to open / close the mouth');
+const jawB = mkHandle('jaw', 'Mouth opening, lower face', 'Drag to open / close the mouth');
+const sizeH = mkHandle('size', 'Disc radius', 'Drag to resize the disc');
+jawA.dataset.k = 'jawA'; jawB.dataset.k = 'jawB'; sizeH.dataset.k = 'size';
+
+/* --- keep handles glued to the scene ------------------------------------- */
+let gizSig = '';
+function syncGiz() {
+  const d = scene.disc;
+  const sig = [d.x, d.y, d.r, d.wdir, d.whalf, scene.nEmit,
+               viewScale, viewOffX, viewOffY, DPR, innerWidth, innerHeight].join() +
+              scene.emitters.slice(0, scene.nEmit).map(e => e.x + ',' + e.y + ',' + e.a).join(';');
+  if (sig === gizSig) return;
+  gizSig = sig;
+
+  const v = viewXf(), S = v.s;
+  const CX = x => v.ox + x * S, CY = y => v.oy + y * S;
+
+  for (let i = 0; i < 8; i++) {
+    const g = aimG[i], e = scene.emitters[i];
+    if (i >= scene.nEmit || !e) {
+      g.hnd.classList.add('off'); g.back.setAttribute('d', ''); g.arc.setAttribute('d', '');
+      continue;
+    }
+    g.hnd.classList.remove('off');
+    // knob stand-off; floored in px so the knob never collides with the
+    // emitter body when the scene is fitted small (portrait / short viewports)
+    const L = Math.max(0.088 * S, 32);
+    const x0 = CX(e.x), y0 = CY(e.y);
+    const dd = arcD(x0, y0, L, e.a - 0.62, e.a + 0.62);
+    g.back.setAttribute('d', dd); g.arc.setAttribute('d', dd);
+    g.hnd.style.transform = 'translate3d(' + (x0 + Math.cos(e.a) * L) + 'px,' +
+                                             (y0 + Math.sin(e.a) * L) + 'px,0)';
+  }
+
+  const cx = CX(d.x), cy = CY(d.y), R = d.r * S;
+  const put = (el, ang, rad) => {
+    el.style.transform = 'translate3d(' + (cx + Math.cos(ang) * rad) + 'px,' +
+                                          (cy + Math.sin(ang) * rad) + 'px,0)';
+  };
+  put(jawA, d.wdir - d.whalf, R * 0.97);
+  put(jawB, d.wdir + d.whalf, R * 0.97);
+  put(sizeH, d.wdir + Math.PI, R);
+
+  /* dashed arc completing the circle across the mouth — reads instantly as
+     "this is the opening", and its ends are exactly the two jaw knobs */
+  const md = arcD(cx, cy, R * 0.97, d.wdir - d.whalf, d.wdir + d.whalf);
+  mouthArc.setAttribute('d', md); mouthBack.setAttribute('d', md);
+  /* radial tick under the size knob */
+  const sa = d.wdir + Math.PI;
+  const td = 'M' + (cx + Math.cos(sa) * R * 0.90).toFixed(1) + ' ' + (cy + Math.sin(sa) * R * 0.90).toFixed(1) +
+             'L' + (cx + Math.cos(sa) * R * 1.08).toFixed(1) + ' ' + (cy + Math.sin(sa) * R * 1.08).toFixed(1);
+  tickArc.setAttribute('d', td); tickBack.setAttribute('d', td);
+}
+/* --- idle fade ---------------------------------------------------------- */
+let gizIdleTimer = 0;
+const GIZ_IDLE_MS = 2400;
+function wakeGiz() {
+  gizEl.classList.remove('idle');
+  clearTimeout(gizIdleTimer);
+  gizIdleTimer = setTimeout(() => {
+    if (!drag && !gizEl.contains(document.activeElement)) gizEl.classList.add('idle');
+  }, GIZ_IDLE_MS);
+}
+['pointermove', 'pointerdown', 'pointerup', 'wheel'].forEach(t =>
+  addEventListener(t, wakeGiz, { passive: true }));
+addEventListener('keydown', wakeGiz);
+gizEl.addEventListener('focusin', wakeGiz);
+wakeGiz();
+
+function gizFrame() { syncGiz(); requestAnimationFrame(gizFrame); }
+requestAnimationFrame(gizFrame);
+
+/* ========================================================================== */
+/*  Picking & dragging                                                        */
+/* ========================================================================== */
+let drag = null;
+
+function pick(p) {
+  for (let i = 0; i < scene.nEmit; i++) {
+    const e = scene.emitters[i];
+    if (Math.hypot(p.x - e.x, p.y - e.y) < 0.045) return { kind: 'emit', i };
+  }
+  const d = scene.disc;
+  const dist = Math.hypot(p.x - d.x, p.y - d.y);
+  if (dist < d.r * 1.03) {
+    if (dist > d.r * 0.80) return { kind: 'discRot' };
+    return { kind: 'disc' };
+  }
+  return null;
+}
+
+function setHover(hit) {
+  hoverDisc = hit && hit.kind !== 'emit' ? 1 : 0;
+  hoverEm   = hit && hit.kind === 'emit' ? hit.i : -1;
+  for (let i = 0; i < 8; i++) aimG[i].arc.classList.toggle('hot', hoverEm === i);
+  mouthArc.classList.toggle('hot', hoverDisc === 1);
+  tickArc.classList.toggle('hot', hoverDisc === 1);
+}
+function beginDrag(d, ev, el) {
+  drag = d;
+  try { (el || canvas).setPointerCapture(ev.pointerId); } catch (err) {}
+  document.body.classList.add('dragging');
+  if (el) el.classList.add('act');
+  hideHint();
+}
+function endDrag() {
+  if (drag && drag.el) drag.el.classList.remove('act');
+  drag = null;
+  document.body.classList.remove('dragging');
+}
+
+canvas.addEventListener('pointerdown', ev => {
+  const p = toWorld(ev);
+  const hit = pick(p);
+  setHover(hit);
+  if (!hit) return;
+  ev.preventDefault();
+  if (hit.kind === 'emit') {
+    const e = scene.emitters[hit.i];
+    sel = { kind: 'emit', i: hit.i };
+    beginDrag({ kind: 'move-emit', i: hit.i, ox: p.x - e.x, oy: p.y - e.y }, ev);
+  } else if (hit.kind === 'disc') {
+    sel = { kind: 'disc' };
+    beginDrag({ kind: 'move-disc', ox: p.x - scene.disc.x, oy: p.y - scene.disc.y }, ev);
+  } else {
+    sel = { kind: 'disc' };
+    beginDrag({ kind: 'rot-disc', a0: Math.atan2(p.y - scene.disc.y, p.x - scene.disc.x), w0: scene.disc.wdir }, ev);
+  }
+});
+
+/* handles take over before the canvas ever sees the event */
+gizEl.addEventListener('pointerdown', ev => {
+  const el = ev.target.closest ? ev.target.closest('.hnd') : null;
+  if (!el) return;
+  ev.preventDefault(); ev.stopPropagation();
+  el.focus({ preventScroll: true });
+  const k = el.dataset.k;
+  if (k === 'aim') sel = { kind: 'emit', i: +el.dataset.i };
+  else sel = { kind: 'disc' };
+  beginDrag({ kind: k, i: +el.dataset.i, el }, ev, el);
+});
+gizEl.addEventListener('pointerover', ev => {
+  const el = ev.target.closest ? ev.target.closest('.hnd') : null;
+  if (!el || drag) return;
+  if (el.dataset.k === 'aim') setHover({ kind: 'emit', i: +el.dataset.i });
+  else setHover({ kind: 'disc' });
+});
+gizEl.addEventListener('pointerout', ev => { if (!drag) setHover(null); });
+
+addEventListener('pointermove', ev => {
+  if (!drag) {
+    if (ev.target === canvas) {
+      const hit = pick(toWorld(ev));
+      canvas.style.cursor = !hit ? 'default'
+        : hit.kind === 'emit' ? 'grab'
+        : hit.kind === 'disc' ? 'move' : 'grab';
+      setHover(hit);
+    }
+    return;
+  }
+  const p = toWorld(ev);
+  const d = scene.disc;
+  switch (drag.kind) {
+    case 'move-emit': {
+      const e = scene.emitters[drag.i];
+      e.x = clamp(p.x - drag.ox, 0.03, 4);
+      e.y = clamp(p.y - drag.oy, 0.03, 0.97);
+      canvas.style.cursor = 'grabbing';
+      break;
+    }
+    case 'move-disc':
+      d.x = p.x - drag.ox; d.y = p.y - drag.oy;
+      canvas.style.cursor = 'grabbing';
+      break;
+    case 'rot-disc':
+      d.wdir = drag.w0 + (Math.atan2(p.y - d.y, p.x - d.x) - drag.a0);
+      say('MOUTH', deg(angNorm(d.wdir)));
+      break;
+    case 'aim': {
+      const e = scene.emitters[drag.i];
+      e.a = Math.atan2(p.y - e.y, p.x - e.x);
+      say('AIM ' + (drag.i + 1), deg(angNorm(e.a)));
+      break;
+    }
+    case 'jawA': case 'jawB': {
+      const a = Math.atan2(p.y - d.y, p.x - d.x);
+      d.whalf = clamp(Math.abs(angNorm(a - d.wdir)), 0.05, 1.4);
+      say('OPENING', deg(d.whalf * 2));
+      break;
+    }
+    case 'size':
+      d.r = clamp(Math.hypot(p.x - d.x, p.y - d.y), 0.08, 0.9);
+      say('RADIUS', d.r.toFixed(3));
+      break;
+  }
+  dirty = true;
+});
+addEventListener('pointerup', endDrag);
+addEventListener('pointercancel', endDrag);
+
+/* ------------------------------------------------------------------- wheel */
+canvas.addEventListener('wheel', ev => {
+  ev.preventDefault();
+  const d = scene.disc;
+  if (ev.shiftKey) {
+    d.whalf = clamp(d.whalf - ev.deltaY * 0.0012, 0.05, 1.4);
+    say('OPENING', deg(d.whalf * 2));
+  } else {
+    d.r = clamp(d.r * (1 - ev.deltaY * 0.0009), 0.08, 0.9);
+    say('RADIUS', d.r.toFixed(3));
+  }
+  hideHint();
+  dirty = true;
+}, { passive: false });
+
+/* ========================================================================== */
+/*  Keyboard                                                                  */
+/* ========================================================================== */
+let sel = { kind: 'disc' };
+const isField = t => t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+
+/* arrow keys on a focused handle nudge exactly that parameter */
+gizEl.addEventListener('keydown', ev => {
+  const el = ev.target.closest ? ev.target.closest('.hnd') : null;
+  if (!el) return;
+  const step = (ev.shiftKey ? 4 : 1);
+  const d = scene.disc;
+  let used = true;
+  const dx = ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowLeft' ? -1 : 0;
+  const dy = ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowUp' ? -1 : 0;
+  if (!dx && !dy) return;
+  const k = el.dataset.k;
+  if (k === 'aim') {
+    const e = scene.emitters[+el.dataset.i];
+    e.a = angNorm(e.a + (dx || dy) * 0.015 * step);
+    say('AIM ' + (+el.dataset.i + 1), deg(e.a));
+  } else if (k === 'size') {
+    d.r = clamp(d.r + (dx - dy) * 0.006 * step, 0.08, 0.9);
+    say('RADIUS', d.r.toFixed(3));
+  } else {
+    d.whalf = clamp(d.whalf + (dx - dy) * 0.02 * step, 0.05, 1.4);
+    say('OPENING', deg(d.whalf * 2));
+  }
+  if (used) { ev.preventDefault(); dirty = true; }
+});
+
+addEventListener('keydown', ev => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  if (isField(ev.target)) return;                    // let sliders keep arrows
+  if (ev.target.closest && ev.target.closest('.hnd')) return;
+  const k = ev.key, d = scene.disc;
+  const big = ev.shiftKey ? 4 : 1;
+  let used = true;
+
+  if (k === 'h' || k === 'H') uiEl.classList.toggle('hidden');
+  else if (k === 'c' || k === 'C') toggleCollapse();
+  else if (k === 'r' || k === 'R') { applyPreset(0); resetScene(); say('SCENE', 'reset'); }
+  else if (k === 'm' || k === 'M') toggleMono();
+  else if (k === 'o' || k === 'O') toggleSpin();
+  else if (k === 's' || k === 'S') exportPNG();
+  else if (k >= '1' && k <= '8') {
+    const i = +k - 1;
+    if (i < scene.nEmit) { sel = { kind: 'emit', i }; say('SELECT', 'emitter ' + k); }
+  }
+  else if (k === '0' || k === 'd' || k === 'D') { sel = { kind: 'disc' }; say('SELECT', 'disc'); }
+  else if (k === '[' ) { rotSel(-0.02 * big); }
+  else if (k === ']' ) { rotSel( 0.02 * big); }
+  else if (k === ',' ) { d.whalf = clamp(d.whalf - 0.02 * big, 0.05, 1.4); say('OPENING', deg(d.whalf * 2)); dirty = true; }
+  else if (k === '.' ) { d.whalf = clamp(d.whalf + 0.02 * big, 0.05, 1.4); say('OPENING', deg(d.whalf * 2)); dirty = true; }
+  else if (k === '-' || k === '_') { d.r = clamp(d.r * 0.97, 0.08, 0.9); say('RADIUS', d.r.toFixed(3)); dirty = true; }
+  else if (k === '=' || k === '+') { d.r = clamp(d.r * 1.03, 0.08, 0.9); say('RADIUS', d.r.toFixed(3)); dirty = true; }
+  else if (k.indexOf('Arrow') === 0) {
+    const s = 0.006 * big;
+    const mx = (k === 'ArrowRight' ? s : k === 'ArrowLeft' ? -s : 0);
+    const my = (k === 'ArrowDown'  ? s : k === 'ArrowUp'   ? -s : 0);
+    if (sel.kind === 'emit' && scene.emitters[sel.i]) {
+      const e = scene.emitters[sel.i];
+      e.x = clamp(e.x + mx, 0.03, 4); e.y = clamp(e.y + my, 0.03, 0.97);
+    } else { d.x += mx; d.y += my; }
+    dirty = true;
+  }
+  else used = false;
+
+  if (used) { ev.preventDefault(); hideHint(); }
+});
+function rotSel(da) {
+  if (sel.kind === 'emit' && scene.emitters[sel.i]) {
+    const e = scene.emitters[sel.i];
+    e.a = angNorm(e.a + da);
+    say('AIM ' + (sel.i + 1), deg(e.a));
+  } else {
+    scene.disc.wdir += da;
+    say('MOUTH', deg(angNorm(scene.disc.wdir)));
+  }
+  dirty = true;
+}
+
+/* ========================================================================== */
+/*  Panel wiring                                                              */
+/* ========================================================================== */
+const ctl = {};
+/* `get` makes the model authoritative: the control is seeded from `scene`
+   (or the camera globals) rather than from the markup's value= attribute, so
+   changing a default in one place is enough and the panel can be re-synced
+   from the model at any time. */
+function bind(id, vid, fmt, fn, get) {
+  const el = $(id), v = $(vid);
+  const lo = parseFloat(el.min), hi = parseFloat(el.max);
+  const upd = () => {
+    const x = parseFloat(el.value);
+    v.textContent = fmt(x);
+    el.style.setProperty('--p', hi > lo ? (x - lo) / (hi - lo) : 0);
+    fn(x); dirty = true;
+  };
+  el.addEventListener('input', upd);
+  ctl[id] = { el, upd, get, set(x) { el.value = x; upd(); } };
+  if (get) el.value = get();
+  upd();
+}
+/** Re-seed every control from the model — used after reset / preset changes. */
+function syncControls() {
+  for (const id in ctl) { const c = ctl[id]; if (c.get) { c.el.value = c.get(); c.upd(); } }
+}
+bind('sEmit',  'vEmit',  x => x | 0,             x => { scene.nEmit = x | 0; layoutEmitters(); }, () => scene.nEmit);
+bind('sRays',  'vRays',  x => x | 0,             x => scene.rays = x | 0, () => scene.rays);
+bind('sPow',   'vPow',   x => x.toFixed(2),      x => scene.power = x, () => scene.power);
+bind('sW',     'vW',     x => x.toFixed(2),      x => scene.beamW = x, () => scene.beamW);
+bind('sIor',   'vIor',   x => x.toFixed(3),      x => scene.ior = x, () => scene.ior);
+bind('sDisp',  'vDisp',  x => x.toFixed(4).slice(1), x => scene.disp = x, () => scene.disp);
+bind('sB',     'vB',     x => x | 0,             x => scene.bounces = x | 0, () => scene.bounces);
+bind('sExp',   'vExp',   x => x.toFixed(2),      x => exposure = x, () => exposure);
+bind('sBloom', 'vBloom', x => x.toFixed(2),      x => bloomK = x, () => bloomK);
+bind('sStreak','vStreak',x => x.toFixed(2),      x => streakK = x, () => streakK);
+bind('sGrain', 'vGrain', x => x.toFixed(2),      x => grainK = x, () => grainK);
+
+/* ------------------------------------------------------------------ toggles */
+const bSpin = $('bSpin'), bMono = $('bMono');
+function toggleSpin(v) {
+  scene.spin = v === undefined ? !scene.spin : !!v;
+  bSpin.setAttribute('aria-pressed', scene.spin ? 'true' : 'false');
+  dirty = true;
+}
+function toggleMono(v) {
+  scene.mono = v === undefined ? !scene.mono : !!v;
+  bMono.setAttribute('aria-pressed', scene.mono ? 'true' : 'false');
+  dirty = true;
+}
+bSpin.addEventListener('click', () => toggleSpin());
+bMono.addEventListener('click', () => toggleMono());
+
+function toggleCollapse() {
+  const col = panel.classList.toggle('col');
+  const b = $('bCol');
+  b.setAttribute('aria-expanded', col ? 'false' : 'true');
+  b.setAttribute('aria-label', col ? 'Expand panel' : 'Collapse panel');
+}
+$('bCol').addEventListener('click', toggleCollapse);
+
+/* ------------------------------------------------------------------- export
+   Hands off to the renderer's supersampled still exporter (it re-renders at a
+   higher internal resolution and lets the accumulator converge), falling back
+   to a plain canvas grab if that API is not present. */
+const bShot = $('bShot'), shotLbl = bShot.querySelector('.lbl');
+let expScale = 2, busy = false;
+async function exportPNG() {
+  if (busy) return;
+  busy = true;
+  bShot.disabled = true;
+  shotLbl.textContent = 'Exporting…';
+  say('EXPORT', expScale + '× rendering');
+  try {
+    const P = window.__prisma;
+    if (P && P.savePNG) await P.savePNG(expScale);
+    else {
+      render(0);
+      const b = await new Promise(res => canvas.toBlob(res, 'image/png'));
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(b); a.download = 'prisma.png'; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+    }
+    say('EXPORT', 'saved at ' + expScale + '×');
+  } catch (err) {
+    say('EXPORT', 'failed');
+  } finally {
+    shotLbl.textContent = 'Save PNG';
+    bShot.disabled = false;
+    busy = false;
+  }
+}
+bShot.addEventListener('click', exportPNG);
+$('bReset').addEventListener('click', () => { applyPreset(0); resetScene(); say('SCENE', 'reset'); });
+
+const segBtns = Array.prototype.slice.call(document.querySelectorAll('.sgb'));
+segBtns.forEach(b => b.addEventListener('click', () => {
+  expScale = +b.dataset.x;
+  segBtns.forEach(o => o.setAttribute('aria-pressed', o === b ? 'true' : 'false'));
+}));
+
+/* ------------------------------------------------------------------ presets */
+const PRESETS = [
+  { n: 'Studio',  disc: { x: DISC0.x, y: DISC0.y, r: DISC0.r, wdir: DISC0.wdir, whalf: DISC0.whalf }, mono: false,
+    s: { sEmit: 4, sRays: 108, sPow: 1.50, sW: 1.00, sIor: 1.360, sDisp: 0.0600, sB: 8,
+         sExp: 1.00, sBloom: 0.90, sStreak: 0.42, sGrain: 0.70 } },
+  { n: 'Spectra', disc: { x: 0.99, y: 0.50, r: 0.405, wdir: 3.18, whalf: 0.80 }, mono: false,
+    s: { sEmit: 6, sRays: 112, sPow: 1.25, sW: 0.85, sIor: 1.780, sDisp: 0.0440, sB: 12,
+         sExp: 1.05, sBloom: 1.10, sStreak: 0.60, sGrain: 0.60 } },
+  { n: 'Solo',    disc: { x: 0.95, y: 0.50, r: 0.445, wdir: 3.36, whalf: 1.10 }, mono: false,
+    s: { sEmit: 1, sRays: 128, sPow: 1.30, sW: 1.10, sIor: 1.550, sDisp: 0.0340, sB: 12,
+         sExp: 1.00, sBloom: 1.05, sStreak: 0.70, sGrain: 0.60 } },
+  { n: 'Halo',    disc: { x: 0.95, y: 0.50, r: 0.340, wdir: 3.30, whalf: 0.62 }, mono: false,
+    s: { sEmit: 8, sRays: 64,  sPow: 0.70, sW: 0.65, sIor: 1.950, sDisp: 0.0500, sB: 14,
+         sExp: 0.95, sBloom: 1.15, sStreak: 1.00, sGrain: 0.80 } },
+  { n: 'Vapour',  disc: { x: 0.90, y: 0.50, r: 0.425, wdir: 3.62, whalf: 1.24 }, mono: false,
+    s: { sEmit: 3, sRays: 128, sPow: 0.55, sW: 0.60, sIor: 1.400, sDisp: 0.0120, sB: 8,
+         sExp: 1.60, sBloom: 0.45, sStreak: 0.20, sGrain: 1.05 } },
+  { n: 'Nocturne',disc: { x: 0.96, y: 0.52, r: 0.330, wdir: 3.15, whalf: 1.05 }, mono: false,
+    s: { sEmit: 4, sRays: 110, sPow: 1.35, sW: 0.60, sIor: 2.050, sDisp: 0.0520, sB: 13,
+         sExp: 0.85, sBloom: 1.50, sStreak: 1.15, sGrain: 0.45 } }
+];
+const chips = Array.prototype.slice.call(document.querySelectorAll('.chip'));
+function applyPreset(n) {
+  const P = PRESETS[n]; if (!P) return;
+  Object.assign(scene.disc, P.disc);
+  scene.disc.spin = 0;
+  for (const k in P.s) if (ctl[k]) ctl[k].set(P.s[k]);
+  toggleMono(P.mono);
+  layoutEmitters();
+  chips.forEach((c, i) => c.setAttribute('aria-pressed', i === n ? 'true' : 'false'));
+  dirty = true;
+}
+chips.forEach(c => c.addEventListener('click', () => {
+  const n = +c.dataset.p;
+  applyPreset(n);
+  say('PRESET', PRESETS[n].n);
+  hideHint();
+}));
+
+/* ?clean=1 renders the artwork alone — used for art-direction review and for
+   exporting stills without the instrument panel. */
+if (new URLSearchParams(location.search).has('clean')) uiEl.style.display = 'none';
+
+/* --------------------------------------------------------------------- hint */
+let hintTimer = setTimeout(hideHint, 11000);
+function hideHint() { $('hint').classList.add('gone'); clearTimeout(hintTimer); }
+//#ENDREGION INTERACT
+
+/* --------------------------------- main loop ------------------------------ */
+resetScene();
+resize();
+addEventListener('resize', resize);
+
+/* A lost GPU context (driver reset, tab suspended on some machines) would
+   otherwise leave a permanently black canvas.  Stop the loop, then rebuild
+   every GL resource when the context comes back. */
+let ctxLost = false;
+canvas.addEventListener('webglcontextlost', ev => { ev.preventDefault(); ctxLost = true; }, false);
+canvas.addEventListener('webglcontextrestored', () => {
+  try {
+    allocTargets(W, H);
+    ctxLost = false;
+    dirty = true;
+  } catch (e) { console.error('context restore failed', e); }
+}, false);
+
+/* the sheet's height changes when it collapses or the device rotates */
+if (window.ResizeObserver) {
+  const pnl = document.querySelector('.panel');
+  if (pnl) new ResizeObserver(() => { updateView(); dirty = true; }).observe(pnl);
+}
+
+let last = performance.now(), fpsAcc = 0, fpsN = 0;
+const fpsEl = document.getElementById('fps');
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!ctxLost) {
+    resize();
+    // A converged still is finished: re-rendering it would blend un-jittered
+    // frames back in and undo the supersampling, and it burns the GPU forever.
+    if (dirty || scene.spin || accN < ACC_MAX) render(dt);
+  }
+  fpsAcc += dt; fpsN++;
+  if (fpsAcc > 0.5) { fpsEl.textContent = Math.round(fpsN / fpsAcc) + ' FPS · ' + segCount + ' rays'; fpsAcc = 0; fpsN = 0; }
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+/* ------------------------------------------------------------ still export
+   Re-renders the frame at a higher internal resolution and lets the
+   progressive accumulator fully converge before reading the pixels back, so an
+   exported still is cleanly supersampled rather than a screen grab. */
+async function exportStill(scale = 2, samples = ACC_MAX) {
+  const cw = canvas.clientWidth, ch = canvas.clientHeight;
+  // keep every float target within a sane VRAM budget (~16 Mpx)
+  const maxPx = 16e6;
+  scale = Math.max(1, Math.min(scale, Math.sqrt(maxPx / Math.max(1, cw * ch))));
+  exporting = true;
+  const prevW = W, prevH = H;
+  try {
+    W = Math.max(2, Math.round(cw * scale));
+    H = Math.max(2, Math.round(ch * scale));
+    canvas.width = W; canvas.height = H;
+    updateView();
+    allocTargets(W, H);
+    dirty = true;
+    for (let i = 0; i < samples; i++) render(0);
+    return await new Promise(res => canvas.toBlob(res, 'image/png'));
+  } finally {
+    exporting = false;
+    W = prevW; H = prevH;
+    canvas.width = 2; canvas.height = 2;      // force resize() to rebuild
+    W = H = 0;
+    resize();
+    dirty = true;
+  }
+}
+async function savePNG(scale = 2) {
+  const blob = await exportStill(scale);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'prisma-' + W + 'x' + H + '.png';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 8000);
+}
+
+window.__prisma = { scene, render, exportStill, savePNG, resetAccum, trace };
+</script>
+</body>
+</html>

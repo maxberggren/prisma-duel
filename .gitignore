@@ -1,0 +1,6 @@
+# Intermediate render output and per-agent working copies (hundreds of MB)
+out/
+shots/
+regions/
+node_modules/
+*.log
