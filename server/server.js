@@ -84,6 +84,7 @@ function pickStaticRoot() {
   return __dirname;
 }
 const STATIC_ROOT = pickStaticRoot();
+const MODULE_DIR = require('path').join(__dirname, '..', 'src');
 const SELF_DIR = __dirname;
 
 const MIME = {
@@ -132,10 +133,15 @@ const httpServer = http.createServer((req, res) => {
     res.writeHead(200, { 'content-type': 'application/json' });
     return res.end(JSON.stringify(roomsSummary()));
   }
-  // /__net/<file> always maps to the directory this server lives in, so net.js
+  // /__net/<file> maps to the client sources, so net.js is reachable even when
+  // the page is served from somewhere else. It lives in ../src (one copy, which
+  // build.js also inlines into index.html).
   // and the test page are reachable even when STATIC_ROOT is the repo root.
   if (url.startsWith('/__net/')) {
-    const abs = safeJoin(SELF_DIR, url.slice('/__net'.length));
+    const rel = url.slice('/__net'.length);
+    // net.js has one home, in ../src, which build.js also inlines into the page;
+    // anything else under /__net (test harnesses) lives beside this server
+    const abs = safeJoin(/^\/net\.js$/.test(rel.split('?')[0]) ? MODULE_DIR : SELF_DIR, rel);
     if (!abs) { res.writeHead(400); return res.end('bad path'); }
     return serveFile(res, abs);
   }
