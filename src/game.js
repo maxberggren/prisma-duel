@@ -557,30 +557,74 @@ $('bSolo').addEventListener('click', () => {
   beginPlan();
 });
 
+let lobbyRoster = [];
+
+/* The match is started explicitly by the arbiter rather than auto-starting at
+   two players. Auto-starting meant a third pilot joining a second later would
+   build a *different* game — different player list, different seed — and desync
+   immediately. The arbiter broadcasts the roster and seed it used, and everyone
+   builds the identical match from that one message. */
+const START_TAG = '\u0001START';           // 6 chars; slice by .length, never a literal
+function startMatchFrom(payload) {
+  if (G.state) return;                                   // already playing
+  const players = payload.players.map(p => ({ id: p.id, name: p.name }));
+  const selfIdx = players.findIndex(p => p.id === Net.selfId());
+  if (selfIdx < 0) { setStatus('This match started without you.', true); return; }
+  newGame(players, payload.seed, selfIdx);
+  NET.live = true;
+  closeLobby();
+  beginPlan();
+}
+
+function refreshLobby() {
+  const n = lobbyRoster.length;
+  setStatus(`Room ${Net.room || ''} — ${n}/4 pilot${n === 1 ? '' : 's'}: ` +
+            lobbyRoster.map(p => p.name).join(', '));
+  const btn = $('bStart');
+  if (!btn) return;
+  const canStart = Net.isArbiter() && n >= 2 && !G.state;
+  btn.style.display = n >= 2 && !G.state ? '' : 'none';
+  btn.disabled = !canStart;
+  btn.textContent = canStart ? `START MATCH — ${n} PILOTS`
+                             : 'WAITING FOR HOST TO START';
+}
+
 $('bJoin').addEventListener('click', async () => {
   if (typeof Net === 'undefined') { setStatus('Multiplayer build not loaded — use Practice.', true); return; }
   const name = ($('lName').value || 'PILOT').toUpperCase().slice(0, 12);
   const room = ($('lRoom').value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   setStatus('Connecting…');
+  $('bJoin').disabled = true;
   try {
     const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-    const { selfId, roster } = await Net.connect({ url, room, name });
+    const { roster } = await Net.connect({ url, room, name });
+    lobbyRoster = roster;
     wireNet();
-    setStatus('Connected. Waiting for pilots…');
-    Net.on('roster', r => {
-      setStatus(`Room ${Net.room || ''} — ${r.length}/4 pilots`);
-      if (r.length >= 2 && !G.state) {
-        const players = r.map(p => ({ id: p.peerId, name: p.name }));
-        const seed = r.reduce((a, p) => a + p.peerId * 7919, 20260815);
-        newGame(players, seed, players.findIndex(p => p.id === selfId));
-        NET.live = true;
-        closeLobby();
-        beginPlan();
-      }
+    Net.on('roster', r => { lobbyRoster = r; refreshLobby(); });
+    Net.on('chat', ({ text }) => {
+      // the start handshake rides the chat channel so the netcode needs no
+      // game-specific message type
+      if (text.slice(0, START_TAG.length) !== START_TAG) return;
+      try { startMatchFrom(JSON.parse(text.slice(START_TAG.length))); } catch (e) { console.warn(e); }
     });
+    refreshLobby();
   } catch (e) {
+    $('bJoin').disabled = false;
     setStatus('Could not reach the matchmaker: ' + e.message, true);
   }
+});
+
+$('bStart').addEventListener('click', () => {
+  if (!Net.isArbiter() || G.state) return;
+  const players = lobbyRoster
+    .slice()
+    .sort((a, b) => a.peerId - b.peerId)          // one canonical order for all
+    .slice(0, 4)
+    .map(p => ({ id: p.peerId, name: p.name }));
+  const seed = players.reduce((a, p) => (a * 31 + p.id) >>> 0, 20260815);
+  const payload = { players, seed };
+  Net.sendChat(START_TAG + JSON.stringify(payload));
+  startMatchFrom(payload);
 });
 
 /* ------------------------------------------------------------- per-frame */
