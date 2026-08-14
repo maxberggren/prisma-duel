@@ -3191,6 +3191,47 @@ function addPreviewBeam() {
   }
 }
 
+/* ---------------------------------------------------------- damage feedback
+   Damage accrues continuously as a beam dwells, which is legible in the fiction
+   but invisible on screen. Floating numbers and a hull flash make the exchange
+   readable: you can see who is being melted, and by how much. */
+const fxLayer = document.createElement('div');
+fxLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden';
+gizEl.parentNode.appendChild(fxLayer);
+const fx = [];
+let dmgAccum = [0, 0, 0, 0], dmgSince = [0, 0, 0, 0];
+
+function spawnDamage(idx, amount) {
+  const sh = G.state.ships[idx];
+  const L = LIVERY[idx % LIVERY.length];
+  const p = w2s(sh.x, sh.y);
+  // fan successive hits apart so a sustained burn reads as a stream of numbers
+  // rather than one illegible pile
+  const n = fx.filter(f => f.idx === idx).length;
+  p.x += ((n % 3) - 1) * 17;
+  p.y -= n * 9;
+  const el = document.createElement('div');
+  const heavy = amount >= 12;
+  el.textContent = '-' + Math.round(amount);
+  el.style.cssText =
+    `position:absolute;left:${p.x}px;top:${p.y - 22}px;transform:translate(-50%,-50%);` +
+    `font:${heavy ? 700 : 600} ${heavy ? 19 : 14.5}px ui-monospace,monospace;letter-spacing:.04em;` +
+    `color:rgb(${L.rgb.map(v => Math.round(120 + v * 135)).join(',')});` +
+    `text-shadow:0 2px 10px rgba(0,0,0,.95);will-change:transform,opacity`;
+  fxLayer.appendChild(el);
+  fx.push({ el, idx, t: 0, life: heavy ? 1.5 : 1.1 });
+}
+function stepFx(dt) {
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.t += dt;
+    const u = f.t / f.life;
+    if (u >= 1) { f.el.remove(); fx.splice(i, 1); continue; }
+    f.el.style.opacity = String(1 - u * u);
+    f.el.style.marginTop = (-26 * u) + 'px';
+  }
+}
+
 /* ============================================================== the turn loop */
 function commitOrders() {
   if (committed || G.phase !== 'plan') return;
@@ -3251,6 +3292,7 @@ function startResolve(moves) {
   G.phase = 'resolve';
   G.ctx = beginTurn(G.state, moves);
   G.sub = 0;
+  dmgAccum = [0, 0, 0, 0]; dmgSince = [0, 0, 0, 0];
   for (const sh of G.state.ships) sh.firing = sh.firedThisTurn;
   committed = false;
   banner('', '');
@@ -3274,12 +3316,23 @@ function stepResolve(dt) {
     applyHits(G.state, beamHits, msPer);
     applyCollisions(G.state, G.ctx);
   }
+  // surface the damage that accrued, in readable lumps rather than per-substep
+  for (let i = 0; i < G.state.ships.length; i++) {
+    const took = G.state.ships[i].tookDamage;
+    const delta = took - dmgSince[i];
+    if (delta <= 0) continue;
+    dmgAccum[i] += delta; dmgSince[i] = took;
+    if (dmgAccum[i] >= 6) { spawnDamage(i, dmgAccum[i]); dmgAccum[i] = 0; }
+  }
+  if (now !== prev) renderRoster();
   dirty = true;
 
   if (G.sub >= S) {
     for (const sh of G.state.ships) sh.firing = false;
     const r = endTurn(G.state);
     renderRoster();
+    for (let i = 0; i < G.state.ships.length; i++)
+      if (dmgAccum[i] > 0.5) { spawnDamage(i, dmgAccum[i]); dmgAccum[i] = 0; }
     if (r.over) {
       G.phase = 'over';
       G.winner = r.winner;
@@ -3302,11 +3355,25 @@ function beginPlan() {
   G.planEnds = performance.now() + RULES.PLAN_SECONDS * 1000;
   gizSig = '';
   syncOrderUI(); renderRoster();
+  flash('TURN ' + (G.state.turn + 1));
   dirty = true;
 }
 
+/** A brief, quiet turn announcement. */
+let flashT = 0;
+function flash(text) {
+  const el = $('banner');
+  $('bannerT').textContent = text; $('bannerS').textContent = '';
+  $('bannerT').style.fontSize = '20px';
+  el.style.opacity = 1;
+  clearTimeout(flashT);
+  flashT = setTimeout(() => { if (G.phase === 'plan') el.style.opacity = 0; }, 900);
+}
+
 function banner(t, s) {
+  clearTimeout(flashT);
   $('bannerT').textContent = t; $('bannerS').textContent = s;
+  $('bannerT').style.fontSize = '';
   $('banner').style.opacity = t ? 1 : 0;
 }
 
@@ -3493,6 +3560,7 @@ $('bJoin').addEventListener('click', async () => {
 function gameFrame(dt) {
   tickClock();
   if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
+  stepFx(dt);
   drawGizmo();
 }
 
