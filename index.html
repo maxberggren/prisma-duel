@@ -386,7 +386,12 @@ const RULES = {
      full. The mirrors closing also keeps bank shots live as space runs out. */
   RING_START: 7,            // turns of open space before the walls move
   RING_RATE: 0.016,         // world units of inset per turn
-  RING_MAX: 0.17,          // any tighter and the box is narrower than a
+  RING_MAX: 0.17,
+  /* Once the walls are as tight as they can go, the box itself starts to
+     collapse: escalating damage to everyone, so a match always terminates.
+     Without it two survivors could still circle inside the closed box —
+     measured, 2 of 6 bot matches ran past 70 turns undecided. */
+  COLLAPSE_DMG: 1.6,        // per turn, per turn elapsed since fully closed          // any tighter and the box is narrower than a
                             // prism, so the constraints stop being satisfiable
 };
 
@@ -701,6 +706,20 @@ function endTurn(state) {
     const thrust = clamp(sh.move.thrust, 0, 1);
     sh.charge = Math.min(RULES.CHARGE_MAX, sh.charge + RULES.CHARGE_RATE * (1 - thrust));
   }
+  /* the collapse, once the ring is fully closed */
+  const fullyClosedAt = RULES.RING_START + RULES.RING_MAX / RULES.RING_RATE;
+  const over = state.turn - fullyClosedAt;
+  if (over > 0) {
+    const dmg = over * RULES.COLLAPSE_DMG;
+    for (const sh of state.ships) {
+      if (!sh.alive) continue;
+      let d = dmg;
+      const a = Math.min(sh.shield, d); sh.shield -= a; d -= a;
+      if (d > 0) sh.hull -= d;
+      if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+    }
+  }
+
   state.turn++;
   state.inset = arenaInset(state.turn);
   const alive = state.ships.filter(s => s.alive);

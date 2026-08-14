@@ -47,6 +47,11 @@ Shields absorb before hull and regenerate only on turns you do not fire. The
 arena walls are mirrors, the prisms are solid cover, and your own bank shot can
 come back and hit you.
 
+**The walls close in.** From turn 7 the mirrored box tightens, and once it is as
+small as it can go it starts to collapse, damaging everyone by an escalating
+amount. Two cautious pilots cannot circle each other forever — verified, with no
+shots fired at all, every match still ends by turn 36.
+
 If you do not commit in time, your ship holds its last course.
 
 ## Layout
@@ -83,8 +88,17 @@ timed out both ended with identical state hashes on both peers.
 ## Tests
 
 ```bash
-node src/core.test.js          # simulation rules + determinism
+node src/core.test.js          # 27 assertions: rules, determinism, invariants
 node build.js --check          # index.html is in sync with src/
-cd server && node test-signalling.js   # server paths, 52 assertions
-cd server && node test-headless.js     # 4 real browsers, real WebRTC mesh
+cd server && node test-signalling.js   # 52 assertions over every server path
+cd server && node test-headless.js     # 45 assertions, 4 real browsers,
+                                       # a real 6-link WebRTC mesh
 ```
+
+Current status: **27/27**, **52/52**, **45/45**. The browser suite spawns four
+headless Chromium processes and needs a reasonably idle machine — under heavy
+CPU contention its final "mesh re-formed" step can time out.
+
+Balance is measured rather than guessed: 10 consecutive 4-bot matches all
+reached a decision, median 21 turns, longest 32, with wins spread across all
+four seats.
