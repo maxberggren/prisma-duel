@@ -384,7 +384,8 @@ const RULES = {
      full. The mirrors closing also keeps bank shots live as space runs out. */
   RING_START: 7,            // turns of open space before the walls move
   RING_RATE: 0.016,         // world units of inset per turn
-  RING_MAX: 0.30,
+  RING_MAX: 0.17,          // any tighter and the box is narrower than a
+                            // prism, so the constraints stop being satisfiable
 };
 
 /* ------------------------------------------------------------ seeded PRNG
@@ -578,13 +579,21 @@ function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
       x += Math.cos(hk) * sk * dt;
       y += Math.sin(hk) * sk * dt;
       const lo = R + IN, hiX = arenaW - R - IN, hiY = arenaH - R - IN;
+      // reflect off the walls...
       if (x < lo) x = lo + (lo - x);
       if (x > hiX) x = hiX - (x - hiX);
       if (y < lo) y = lo + (lo - y);
       if (y > hiY) y = hiY - (y - hiY);
-      x = clamp(x, lo, Math.max(lo, hiX));
-      y = clamp(y, lo, Math.max(lo, hiY));
-      if (prisms && prisms.length) { const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y; }
+      /* ...then settle the two constraints together. Pushing out of a prism
+         after clamping to the wall would shove a ship squeezed between them
+         straight through the wall, so alternate and finish on the wall. */
+      for (let it = 0; it < 3; it++) {
+        if (prisms && prisms.length) {
+          const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y;
+        }
+        x = clamp(x, lo, Math.max(lo, hiX));
+        y = clamp(y, lo, Math.max(lo, hiY));
+      }
     }
   }
   return path;
@@ -592,6 +601,21 @@ function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
 
 function beginTurn(state, movesById) {
   const plan = [];
+  /* The walls closed since last turn, so a ship parked on the old boundary can
+     now be outside the new one. The wall physically shoves it back in. */
+  {
+    const IN = arenaInset(state.turn), R = RULES.HULL_R;
+    const lo = IN + R, hiX = state.arena.w - IN - R, hiY = state.arena.h - IN - R;
+    for (const sh of state.ships) {
+      sh.x = clamp(sh.x, lo, Math.max(lo, hiX));
+      sh.y = clamp(sh.y, lo, Math.max(lo, hiY));
+      if (state.arena.prisms.length) {
+        const q = pushOutOfPrisms(state.arena.prisms, sh.x, sh.y, RULES.MUZZLE_CLEAR);
+        sh.x = clamp(q.x, lo, Math.max(lo, hiX));
+        sh.y = clamp(q.y, lo, Math.max(lo, hiY));
+      }
+    }
+  }
 
   for (const ship of state.ships) {
     const raw = movesById[ship.id] || ship.move;   // timeout => hold last course

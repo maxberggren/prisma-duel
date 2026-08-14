@@ -145,6 +145,44 @@ console.log('\narena containment');
      st.ships.map(s => `(${s.x.toFixed(2)},${s.y.toFixed(2)})`).join(' '));
 }
 
+console.log('\ninvariants under the closing arena');
+{
+  /* Two constraints act on a ship at once — the mirrored walls (which close in
+     over the match) and the solid prisms. Settling them in the wrong order used
+     to shove a ship squeezed between the two straight through the wall, and a
+     ship that ends up inside a prism fires from a muzzle buried in glass. */
+  const MUZ = C.RULES.HULL_R * 1.35;
+  let outside = 0, muzzleIn = 0, samples = 0, worst = 0;
+  for (let seed = 1; seed <= 12; seed++) {
+    const st = C.makeState(PLAYERS, seed * 131);
+    for (let t = 0; t < 30; t++) {
+      const moves = {};
+      for (const s of st.ships)
+        moves[s.id] = { heading: s.heading + 0.9 * Math.sin(t * 2.3 + s.idx),
+                        speed: C.RULES.SPEED_MAX, thrust: 1, fire: false };
+      const ctx = C.beginTurn(st, moves);
+      for (let k = 1; k <= ctx.substeps; k++) {
+        C.applySubstep(st, ctx, k);
+        const IN = C.arenaInset(st.turn), R = C.RULES.HULL_R;
+        for (const s of st.ships) {
+          samples++;
+          const out = Math.max(IN + R - s.x, s.x - (st.arena.w - IN - R),
+                               IN + R - s.y, s.y - (st.arena.h - IN - R));
+          if (out > 1e-6) { outside++; worst = Math.max(worst, out); }
+          const mx = s.x + Math.cos(s.heading) * MUZ, my = s.y + Math.sin(s.heading) * MUZ;
+          for (const pr of st.arena.prisms) if (C.prismSD(pr, mx, my) < 0) muzzleIn++;
+        }
+      }
+      C.endTurn(st);
+    }
+  }
+  ok(`no ship escapes the closing walls (${samples.toLocaleString()} samples)`,
+     outside === 0, `${outside} escapes, worst ${worst.toExponential(2)}`);
+  ok('no muzzle is ever inside a prism', muzzleIn === 0, `${muzzleIn} occurrences`);
+  ok('the closed arena stays larger than a prism',
+     (C.RULES.ARENA_H - 2 * C.RULES.RING_MAX) > 0.30);
+}
+
 console.log('\ntimeout behaviour');
 {
   const st = C.makeState(PLAYERS, 11);
