@@ -90,6 +90,7 @@ timed out both ended with identical state hashes on both peers.
 ```bash
 node src/core.test.js          # 27 assertions: rules, determinism, invariants
 node build.js --check          # index.html is in sync with src/
+python3 tools/boottest.py      # the shipped page actually boots and starts a match
 cd server && node test-signalling.js   # 52 assertions over every server path
 cd server && node test-headless.js     # 45 assertions, 4 real browsers,
                                        # a real 6-link WebRTC mesh
