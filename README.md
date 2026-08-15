@@ -59,7 +59,7 @@ If you do not commit in time, your ship holds its last course.
 ```
 index.html      the shipped game — one self-contained file, no dependencies
 src/core.js     deterministic simulation core (the rules)
-src/core.test.js  24 tests, incl. determinism and arena containment
+src/core.test.js  27 tests: determinism, rules, and arena invariants
 src/net.js      WebRTC mesh + lockstep client
 src/game.js     turn loop, orders, preview, netcode glue
 src/hud.{css,html}
