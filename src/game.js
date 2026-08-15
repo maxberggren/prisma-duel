@@ -183,6 +183,95 @@ function addPreviewBeam() {
   }
 }
 
+/* ====================== destruction: explosion & smoke ====================
+   Cosmetic only. The *trigger* is deterministic — a ship dies on the same
+   substep on every peer — but the particles never enter the state hash or the
+   resync payload, so they can run at frame rate and vary harmlessly per client. */
+const vfx = { puffs: [], sparks: [] };
+let vfxSeed = 1;
+function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
+
+function spawnDestruction(sh) {
+  const L = LIVERY[sh.idx % LIVERY.length];
+  const R = RULES.HULL_R;
+
+  /* the flash: brief, white-hot, and large enough to bloom */
+  vfx.sparks.push({ x: sh.x, y: sh.y, r: R * 3.2, a: 1, t: 0, life: 0.16,
+                    cr: 1, cg: 0.95, cb: 0.85, seed: vrnd(), kind: 'flash', r0: R * 3.2, r1: R * 7.5 });
+
+  /* embers: hot, fast, short-lived, tinted by the livery they came off */
+  for (let i = 0; i < 34; i++) {
+    const a = vrnd() * TAU, sp = (0.12 + vrnd() * 0.55);
+    const heat = 0.55 + vrnd() * 0.45;
+    vfx.sparks.push({
+      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      r: R * (0.10 + vrnd() * 0.16), a: 1, t: 0, life: 0.5 + vrnd() * 1.4,
+      cr: 1.0 * heat, cg: (0.55 + 0.3 * vrnd()) * heat, cb: (0.18 + 0.25 * L[2]) * heat,
+      seed: vrnd(), kind: 'ember', drag: 1.1 + vrnd() * 1.4,
+    });
+  }
+
+  /* the fireball, which cools into smoke */
+  for (let i = 0; i < 10; i++) {
+    const a = vrnd() * TAU, sp = 0.05 + vrnd() * 0.16;
+    vfx.puffs.push({
+      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      r: R * (0.5 + vrnd() * 0.5), r1: R * (2.4 + vrnd() * 2.2),
+      a: 0, t: 0, life: 0.55 + vrnd() * 0.5, seed: vrnd(),
+      cr: 1.0, cg: 0.42, cb: 0.12, hot: 1,
+    });
+  }
+
+  /* the smoke column proper: slower, larger, long-lived */
+  for (let i = 0; i < 26; i++) {
+    const a = vrnd() * TAU, sp = 0.012 + vrnd() * 0.075;
+    vfx.puffs.push({
+      x: sh.x + Math.cos(a) * R * 0.5, y: sh.y + Math.sin(a) * R * 0.5,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.012,
+      r: R * (0.35 + vrnd() * 0.55), r1: R * (2.2 + vrnd() * 3.4),
+      a: 0, t: -vrnd() * 0.55, life: 3.2 + vrnd() * 4.5, seed: vrnd(),
+      cr: 0.10, cg: 0.095, cb: 0.10, hot: 0,
+    });
+  }
+}
+
+function stepVfx(dt) {
+  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
+    const p = vfx.puffs[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }             // staggered ignition
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.22, dt);
+    p.vx *= drag; p.vy *= drag;
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.35, dt));  // billow outward, slowing
+    if (p.hot) {
+      // the fireball cools from white through orange into soot
+      const k = 1 - u;
+      p.cr = 1.0 * k + 0.10 * u; p.cg = (0.30 + 0.55 * k * k) * k + 0.095 * u; p.cb = 0.10 * k + 0.10 * u;
+      p.a = Math.sin(Math.min(1, u * 3.2) * Math.PI * 0.5) * (1 - u) * 0.95;
+    } else {
+      p.a = Math.min(1, u * 5.0) * (1 - u) * (1 - u) * 0.5;
+    }
+  }
+  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
+    const p = vfx.sparks[i];
+    p.t += dt;
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
+    if (p.kind === 'flash') {
+      p.r = p.r0 + (p.r1 - p.r0) * u;                // an expanding shell
+      p.a = (1 - u) * (1 - u) * 2.4;
+      continue;
+    }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.02, dt * p.drag);
+    p.vx *= drag; p.vy *= drag;
+    p.a = (1 - u) * (1 - u) * (0.65 + 0.35 * Math.sin(p.t * 37 + p.seed * 20));  // ember flicker
+  }
+}
+
 /* ---------------------------------------------------------- damage feedback
    Damage accrues continuously as a beam dwells, which is legible in the fiction
    but invisible on screen. Floating numbers and a hull flash make the exchange
@@ -333,6 +422,12 @@ function stepResolve(dt) {
     applyHits(G.state, beamHits, msPer);
     applyCollisions(G.state, G.ctx);
   }
+  // a ship that just died throws its explosion here, once
+  for (let i = 0; i < G.state.ships.length; i++) {
+    const sh = G.state.ships[i];
+    if (!sh.alive && !sh.vfxDone) { sh.vfxDone = true; spawnDestruction(sh); }
+  }
+
   // surface the damage that accrued, in readable lumps rather than per-substep
   for (let i = 0; i < G.state.ships.length; i++) {
     const took = G.state.ships[i].tookDamage;
@@ -795,6 +890,8 @@ $('bStart').addEventListener('click', () => {
 function gameFrame(dt) {
   tickClock();
   if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
+  stepVfx(dt);
+  if (vfx.puffs.length || vfx.sparks.length) dirty = true;   // keep the frame live
   stepFx(dt);
   drawGizmo();
 }

@@ -54,6 +54,8 @@ const RULES = {
   CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
+  DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
+  DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
   HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
   MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
@@ -200,6 +202,7 @@ function makeState(players, seed) {
     seed,
     turn: 0,
     inset: 0,
+    debris: [],
     arena: makeArena(seed, ships.map(s => ({ x: s.x, y: s.y }))),
     ships,
     log: [],
@@ -232,6 +235,87 @@ function legaliseMove(ship, move) {
   const heading = ship.heading + clamp(d, -rate, rate);
   const canFire = ship.charge >= RULES.FIRE_COST - 1e-9;
   return { heading, speed, thrust, fire: !!move.fire && canFire };
+}
+
+/* ============================================================ destruction
+   A destroyed ship tears into shards that tumble away, slow down and come to
+   rest on the floor, where they stay for the rest of the match. Everything
+   here is seeded from (arena seed, ship id, turn) so every peer produces the
+   same wreckage without exchanging a byte. */
+function explode(state, sh, cause) {
+  if (!sh.alive) return;
+  sh.alive = false; sh.hull = 0; sh.shield = 0;
+  const rnd = mulberry32(((state.seed ^ (sh.id * 2654435761) ^ (state.turn * 40503)) >>> 0) || 1);
+
+  /* A ship does not shatter into gravel — it comes apart along its structure.
+     Each piece is a named section of the airframe, and it is thrown roughly in
+     the direction that section actually sat, so the wreck reads as a craft that
+     broke up rather than as a pile of shrapnel.
+     part: 0 nose  1 forebody  2 port wing  3 stbd wing
+           4 centre 5 tail boom 6 port fin  7 stbd fin                        */
+  const PARTS = [
+    { part: 0, ox:  0.80, oy:  0.00, size: 0.43, mass: 0.9 },
+    { part: 1, ox:  0.35, oy:  0.00, size: 0.29, mass: 1.0 },
+    { part: 2, ox: -0.35, oy:  0.55, size: 0.66, mass: 0.7 },
+    { part: 3, ox: -0.35, oy: -0.55, size: 0.66, mass: 0.7 },
+    { part: 4, ox: -0.10, oy:  0.00, size: 0.33, mass: 1.2 },
+    { part: 5, ox: -0.55, oy:  0.00, size: 0.33, mass: 1.0 },
+    { part: 6, ox: -0.82, oy:  0.24, size: 0.33, mass: 0.5 },
+    { part: 7, ox: -0.82, oy: -0.24, size: 0.33, mass: 0.5 },
+  ];
+  const ch = Math.cos(sh.heading), sn = Math.sin(sh.heading);
+  for (const P of PARTS) {
+    // where that section sat on the hull, in world space
+    const lx = P.ox * RULES.HULL_R, ly = P.oy * RULES.HULL_R;
+    const wx = sh.x + lx * ch - ly * sn;
+    const wy = sh.y + lx * sn + ly * ch;
+    // thrown outward from the centre of mass, lighter parts thrown harder
+    const away = Math.atan2(wy - sh.y, wx - sh.x) + (rnd() - 0.5) * 0.8;
+    const sp = (0.09 + rnd() * 0.20) / P.mass;
+    state.debris.push({
+      x: wx, y: wy,
+      vx: Math.cos(away) * sp + ch * sh.speed * 0.6,
+      vy: Math.sin(away) * sp + sn * sh.speed * 0.6,
+      rot: sh.heading + (rnd() - 0.5) * 0.5,
+      spin: (rnd() - 0.5) * 9 / P.mass,
+      size: P.size,
+      part: P.part,
+      shape: rnd(),                    // small per-piece tear variation
+      idx: sh.idx,
+      burn: 0.2 + rnd() * 0.55,
+      rest: 0,
+    });
+  }
+  while (state.debris.length > RULES.DEBRIS_MAX) state.debris.shift();
+  state.log.push({ turn: state.turn, dead: sh.id, cause: cause || 'laser' });
+}
+
+/** One substep of wreckage physics. Deterministic; runs on every peer. */
+function stepDebris(state) {
+  const dt = 1 / RULES.SUBSTEPS;
+  const IN = arenaInset(state.turn);
+  const lo = IN, hiX = state.arena.w - IN, hiY = state.arena.h - IN;
+  const drag = Math.pow(0.015, dt);          // settles inside one turn
+  for (const d of state.debris) {
+    if (d.rest) {
+      // the closing wall still shoves settled wreckage along
+      d.x = clamp(d.x, lo, Math.max(lo, hiX));
+      d.y = clamp(d.y, lo, Math.max(lo, hiY));
+      continue;
+    }
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    d.rot += d.spin * dt;
+    d.vx *= drag; d.vy *= drag; d.spin *= drag;
+    if (d.x < lo) { d.x = lo; d.vx = Math.abs(d.vx) * 0.45; }
+    if (d.x > hiX) { d.x = hiX; d.vx = -Math.abs(d.vx) * 0.45; }
+    if (d.y < lo) { d.y = lo; d.vy = Math.abs(d.vy) * 0.45; }
+    if (d.y > hiY) { d.y = hiY; d.vy = -Math.abs(d.vy) * 0.45; }
+    if (state.arena.prisms.length) {
+      const q = pushOutOfPrisms(state.arena.prisms, d.x, d.y, RULES.HULL_R * 0.35);
+      d.x = q.x; d.y = q.y;
+    }
+    if (Math.hypot(d.vx, d.vy) < 0.006) { d.rest = 1; d.vx = 0; d.vy = 0; d.spin = 0; }
+  }
 }
 
 /* ============================================================================
@@ -301,6 +385,11 @@ function beginTurn(state, movesById) {
         sh.y = clamp(q.y, lo, Math.max(lo, hiY));
       }
     }
+    // the wall sweeps settled wreckage inward too
+    for (const d of state.debris) {
+      d.x = clamp(d.x, lo, Math.max(lo, hiX));
+      d.y = clamp(d.y, lo, Math.max(lo, hiY));
+    }
   }
 
   for (const ship of state.ships) {
@@ -331,6 +420,7 @@ function applySubstep(state, turnCtx, sub) {
     sh.x = n.x; sh.y = n.y; sh.heading = n.heading; sh.speed = n.speed;
   }
   for (const pr of state.arena.prisms) pr.wdir += pr.spin / S;
+  stepDebris(state);
 }
 
 /** Apply one substep's worth of laser dwell. */
@@ -347,7 +437,7 @@ function applyHits(state, hits, msPerSubstep) {
     sh.shield -= absorbed;
     dmg -= absorbed;
     if (dmg > 0) sh.hull -= dmg;
-    if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+    if (sh.hull <= 0) explode(state, sh, 'laser');
   }
 }
 
@@ -369,7 +459,7 @@ function applyCollisions(state, turnCtx) {
         let dmg = RULES.COLLIDE_DMG;
         const a = Math.min(sh.shield, dmg); sh.shield -= a; dmg -= a;
         if (dmg > 0) sh.hull -= dmg;
-        if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+        if (sh.hull <= 0) explode(state, sh, 'collision');
       }
     }
   }
@@ -395,7 +485,7 @@ function endTurn(state) {
       let d = dmg;
       const a = Math.min(sh.shield, d); sh.shield -= a; d -= a;
       if (d > 0) sh.hull -= d;
-      if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+      if (sh.hull <= 0) explode(state, sh, 'collapse');
     }
   }
 
@@ -425,7 +515,8 @@ function stateHash(state) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { RULES, TAU, clamp, lerp, angDelta, mulberry32, makeArena, makeShip,
-                     makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, arenaInset, beginTurn,
+                     makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, arenaInset,
+                     explode, stepDebris, beginTurn,
                      prismSD, pushOutOfPrisms,
                      applySubstep, applyHits, applyCollisions, endTurn, stateHash };
 }

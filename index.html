@@ -375,6 +375,8 @@ const RULES = {
   CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
+  DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
+  DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
   HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
   MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
@@ -521,6 +523,7 @@ function makeState(players, seed) {
     seed,
     turn: 0,
     inset: 0,
+    debris: [],
     arena: makeArena(seed, ships.map(s => ({ x: s.x, y: s.y }))),
     ships,
     log: [],
@@ -553,6 +556,87 @@ function legaliseMove(ship, move) {
   const heading = ship.heading + clamp(d, -rate, rate);
   const canFire = ship.charge >= RULES.FIRE_COST - 1e-9;
   return { heading, speed, thrust, fire: !!move.fire && canFire };
+}
+
+/* ============================================================ destruction
+   A destroyed ship tears into shards that tumble away, slow down and come to
+   rest on the floor, where they stay for the rest of the match. Everything
+   here is seeded from (arena seed, ship id, turn) so every peer produces the
+   same wreckage without exchanging a byte. */
+function explode(state, sh, cause) {
+  if (!sh.alive) return;
+  sh.alive = false; sh.hull = 0; sh.shield = 0;
+  const rnd = mulberry32(((state.seed ^ (sh.id * 2654435761) ^ (state.turn * 40503)) >>> 0) || 1);
+
+  /* A ship does not shatter into gravel — it comes apart along its structure.
+     Each piece is a named section of the airframe, and it is thrown roughly in
+     the direction that section actually sat, so the wreck reads as a craft that
+     broke up rather than as a pile of shrapnel.
+     part: 0 nose  1 forebody  2 port wing  3 stbd wing
+           4 centre 5 tail boom 6 port fin  7 stbd fin                        */
+  const PARTS = [
+    { part: 0, ox:  0.80, oy:  0.00, size: 0.43, mass: 0.9 },
+    { part: 1, ox:  0.35, oy:  0.00, size: 0.29, mass: 1.0 },
+    { part: 2, ox: -0.35, oy:  0.55, size: 0.66, mass: 0.7 },
+    { part: 3, ox: -0.35, oy: -0.55, size: 0.66, mass: 0.7 },
+    { part: 4, ox: -0.10, oy:  0.00, size: 0.33, mass: 1.2 },
+    { part: 5, ox: -0.55, oy:  0.00, size: 0.33, mass: 1.0 },
+    { part: 6, ox: -0.82, oy:  0.24, size: 0.33, mass: 0.5 },
+    { part: 7, ox: -0.82, oy: -0.24, size: 0.33, mass: 0.5 },
+  ];
+  const ch = Math.cos(sh.heading), sn = Math.sin(sh.heading);
+  for (const P of PARTS) {
+    // where that section sat on the hull, in world space
+    const lx = P.ox * RULES.HULL_R, ly = P.oy * RULES.HULL_R;
+    const wx = sh.x + lx * ch - ly * sn;
+    const wy = sh.y + lx * sn + ly * ch;
+    // thrown outward from the centre of mass, lighter parts thrown harder
+    const away = Math.atan2(wy - sh.y, wx - sh.x) + (rnd() - 0.5) * 0.8;
+    const sp = (0.09 + rnd() * 0.20) / P.mass;
+    state.debris.push({
+      x: wx, y: wy,
+      vx: Math.cos(away) * sp + ch * sh.speed * 0.6,
+      vy: Math.sin(away) * sp + sn * sh.speed * 0.6,
+      rot: sh.heading + (rnd() - 0.5) * 0.5,
+      spin: (rnd() - 0.5) * 9 / P.mass,
+      size: P.size,
+      part: P.part,
+      shape: rnd(),                    // small per-piece tear variation
+      idx: sh.idx,
+      burn: 0.2 + rnd() * 0.55,
+      rest: 0,
+    });
+  }
+  while (state.debris.length > RULES.DEBRIS_MAX) state.debris.shift();
+  state.log.push({ turn: state.turn, dead: sh.id, cause: cause || 'laser' });
+}
+
+/** One substep of wreckage physics. Deterministic; runs on every peer. */
+function stepDebris(state) {
+  const dt = 1 / RULES.SUBSTEPS;
+  const IN = arenaInset(state.turn);
+  const lo = IN, hiX = state.arena.w - IN, hiY = state.arena.h - IN;
+  const drag = Math.pow(0.015, dt);          // settles inside one turn
+  for (const d of state.debris) {
+    if (d.rest) {
+      // the closing wall still shoves settled wreckage along
+      d.x = clamp(d.x, lo, Math.max(lo, hiX));
+      d.y = clamp(d.y, lo, Math.max(lo, hiY));
+      continue;
+    }
+    d.x += d.vx * dt; d.y += d.vy * dt;
+    d.rot += d.spin * dt;
+    d.vx *= drag; d.vy *= drag; d.spin *= drag;
+    if (d.x < lo) { d.x = lo; d.vx = Math.abs(d.vx) * 0.45; }
+    if (d.x > hiX) { d.x = hiX; d.vx = -Math.abs(d.vx) * 0.45; }
+    if (d.y < lo) { d.y = lo; d.vy = Math.abs(d.vy) * 0.45; }
+    if (d.y > hiY) { d.y = hiY; d.vy = -Math.abs(d.vy) * 0.45; }
+    if (state.arena.prisms.length) {
+      const q = pushOutOfPrisms(state.arena.prisms, d.x, d.y, RULES.HULL_R * 0.35);
+      d.x = q.x; d.y = q.y;
+    }
+    if (Math.hypot(d.vx, d.vy) < 0.006) { d.rest = 1; d.vx = 0; d.vy = 0; d.spin = 0; }
+  }
 }
 
 /* ============================================================================
@@ -622,6 +706,11 @@ function beginTurn(state, movesById) {
         sh.y = clamp(q.y, lo, Math.max(lo, hiY));
       }
     }
+    // the wall sweeps settled wreckage inward too
+    for (const d of state.debris) {
+      d.x = clamp(d.x, lo, Math.max(lo, hiX));
+      d.y = clamp(d.y, lo, Math.max(lo, hiY));
+    }
   }
 
   for (const ship of state.ships) {
@@ -652,6 +741,7 @@ function applySubstep(state, turnCtx, sub) {
     sh.x = n.x; sh.y = n.y; sh.heading = n.heading; sh.speed = n.speed;
   }
   for (const pr of state.arena.prisms) pr.wdir += pr.spin / S;
+  stepDebris(state);
 }
 
 /** Apply one substep's worth of laser dwell. */
@@ -668,7 +758,7 @@ function applyHits(state, hits, msPerSubstep) {
     sh.shield -= absorbed;
     dmg -= absorbed;
     if (dmg > 0) sh.hull -= dmg;
-    if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+    if (sh.hull <= 0) explode(state, sh, 'laser');
   }
 }
 
@@ -690,7 +780,7 @@ function applyCollisions(state, turnCtx) {
         let dmg = RULES.COLLIDE_DMG;
         const a = Math.min(sh.shield, dmg); sh.shield -= a; dmg -= a;
         if (dmg > 0) sh.hull -= dmg;
-        if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+        if (sh.hull <= 0) explode(state, sh, 'collision');
       }
     }
   }
@@ -716,7 +806,7 @@ function endTurn(state) {
       let d = dmg;
       const a = Math.min(sh.shield, d); sh.shield -= a; d -= a;
       if (d > 0) sh.hull -= d;
-      if (sh.hull <= 0) { sh.hull = 0; sh.alive = false; }
+      if (sh.hull <= 0) explode(state, sh, 'collapse');
     }
   }
 
@@ -2238,6 +2328,202 @@ void main(){
   fragColor = vec4(mix(prev, cur, uW), 1.0);
 }`;
 
+
+/* ============================== WRECKAGE =================================
+   Shards from destroyed ships, drawn between the arena and the beams with
+   premultiplied alpha so each quad can carry both its own contact shadow and
+   the shard itself. */
+const VS_DEBRIS = `#version 300 es
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 aPos;      // x, y, rot, hull-span of this section
+layout(location=2) in vec4 aCol;      // livery rgb, burn
+layout(location=3) in vec4 aExt;      // tear seed, part index, -, -
+uniform vec2 uRes; uniform float uH; uniform vec2 uOff; uniform vec2 uJitter;
+uniform float uHullR;
+out vec2 vP; out vec4 vCol; out float vSeed; out float vPart; out float vSpan; out float vScale;
+void main(){
+  float r = aPos.w * uHullR * 1.55;             // section, plus room for its shadow
+  float c = cos(aPos.z), s = sin(aPos.z);
+  vec2 local = aCorner * r;
+  vec2 world = aPos.xy + vec2(local.x*c - local.y*s, local.x*s + local.y*c);
+  vP = aCorner; vCol = aCol; vSeed = aExt.x; vPart = aExt.y; vSpan = aPos.w;
+  vScale = r * uH;
+  vec2 sp = world*uH + uOff;
+  vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
+  gl_Position = vec4(clip - uJitter/uRes*2.0, 0.0, 1.0);
+}`;
+
+const FS_DEBRIS = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vCol; in float vSeed; in float vPart; in float vSpan; in float vScale;
+out vec4 fragColor;
+
+float h11(float x){ return fract(sin(x*127.1)*43758.5453); }
+float sdSeg(vec2 p, vec2 a, vec2 b){
+  vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
+  return length(pa-ba*h);
+}
+float dTri(vec2 p, vec2 a, vec2 b, vec2 c){
+  vec2 e0=b-a, e1=c-b, e2=a-c, v0=p-a, v1=p-b, v2=p-c;
+  vec2 q0=v0-e0*clamp(dot(v0,e0)/dot(e0,e0),0.0,1.0);
+  vec2 q1=v1-e1*clamp(dot(v1,e1)/dot(e1,e1),0.0,1.0);
+  vec2 q2=v2-e2*clamp(dot(v2,e2)/dot(e2,e2),0.0,1.0);
+  float s=sign(e0.x*e2.y-e0.y*e2.x);
+  vec2 d=min(min(vec2(dot(q0,q0), s*(v0.x*e0.y-v0.y*e0.x)),
+                 vec2(dot(q1,q1), s*(v1.x*e1.y-v1.y*e1.x))),
+                 vec2(dot(q2,q2), s*(v2.x*e2.y-v2.y*e2.x)));
+  return -sqrt(d.x)*sign(d.y);
+}
+float sdBoxL(vec2 q, vec2 h){ vec2 d=abs(q)-h; return length(max(d,0.0))+min(max(d.x,d.y),0.0); }
+
+/* The airframe, in hull-radius units, nose at +x. Wreckage is cut out of this
+   same silhouette, which is what makes a fragment read as a piece of the craft
+   rather than as generic shrapnel. */
+float hullSil(vec2 q){
+  vec2 m = vec2(q.x, abs(q.y));
+  float body = sdSeg(m, vec2(-0.62,0.0), vec2(1.05,0.0))
+             - mix(0.085, 0.26, smoothstep(1.05,-0.55,m.x));
+  float wing = dTri(m, vec2(0.28,0.02), vec2(-0.80,0.95), vec2(-0.52,0.04)) - 0.045;
+  float tail = dTri(m, vec2(-0.32,0.02), vec2(-0.98,0.36), vec2(-0.74,0.02)) - 0.035;
+  return min(min(body, wing), tail);
+}
+/* Which box of the airframe this section was torn from. */
+void partBox(float p, out vec2 c, out vec2 h){
+  int i = int(p + 0.5);
+  if      (i==0){ c=vec2( 0.80, 0.00); h=vec2(0.34,0.20); }   // nose
+  else if (i==1){ c=vec2( 0.35, 0.00); h=vec2(0.22,0.20); }   // forebody
+  else if (i==2){ c=vec2(-0.35, 0.55); h=vec2(0.50,0.52); }   // port wing
+  else if (i==3){ c=vec2(-0.35,-0.55); h=vec2(0.50,0.52); }   // starboard wing
+  else if (i==4){ c=vec2(-0.10, 0.00); h=vec2(0.26,0.20); }   // centre section
+  else if (i==5){ c=vec2(-0.55, 0.00); h=vec2(0.26,0.16); }   // tail boom
+  else if (i==6){ c=vec2(-0.82, 0.24); h=vec2(0.24,0.26); }   // port fin
+  else          { c=vec2(-0.82,-0.24); h=vec2(0.24,0.26); }   // starboard fin
+}
+/* Metal tears, it does not cut cleanly: the separation line is ragged. */
+float tornCut(vec2 q, vec2 c, vec2 h, float seed, float span){
+  float b = sdBoxL(q - c, h);
+  // ripple wavelength and amplitude both scale with the section, so a fin and
+  // a wing panel tear at the same apparent grain
+  float f = 11.0 / max(span, 0.05);
+  float a = 0.055 * span;
+  float rip = a*sin(dot(q, vec2(f, f*0.78)) + seed*21.0)
+            + a*0.55*sin(dot(q, vec2(-f*1.4, f*1.6)) + seed*11.0);
+  return b + rip;
+}
+
+float sectionSD(vec2 q, float part, float seed, float span){
+  vec2 c, h; partBox(part, c, h);
+  return max(hullSil(q), tornCut(q, c, h, seed, span));
+}
+
+void main(){
+  vec2 c, h; partBox(vPart, c, h);
+  vec2 q = vP * vSpan + c;                    // back into hull-local space
+
+  float d = sectionSD(q, vPart, vSeed, vSpan);
+  float w = max(fwidth(d), 1e-4);
+  float m = 1.0 - smoothstep(-w, w, d);
+
+  /* contact shadow, offset with the key light from upper-left */
+  float ds = sectionSD(q - vec2(0.055, 0.085)*vSpan, vPart, vSeed, vSpan);
+  float sh = (1.0 - smoothstep(-0.01, 0.16*vSpan, ds)) * 0.55;
+  if (m < 0.002 && sh < 0.002) { fragColor = vec4(0.0); return; }
+
+  /* A torn section is a flat plate lying at its own angle, so the facing is a
+     per-piece constant; per-pixel screen derivatives gave a 2x2 stipple. */
+  float tilt = (h11(vSeed + 7.0) - 0.5) * 1.7;
+  float yaw  = h11(vSeed + 11.0) * 6.2831853;
+  vec3  n    = normalize(vec3(sin(tilt)*cos(yaw), sin(tilt)*sin(yaw), cos(tilt)));
+  vec3  L    = normalize(vec3(-0.6, -0.75, 0.65));
+  float lam  = clamp(dot(n, L), 0.0, 1.0);
+
+  float bevel = smoothstep(0.0, 0.055*vSpan, -d);
+  float burn  = clamp(vCol.a, 0.0, 1.0);
+
+  vec3 metal = mix(vec3(0.145,0.150,0.170), vec3(0.048,0.044,0.050), burn);
+  vec3 base  = metal * (0.42 + 0.85*lam) * (0.55 + 0.45*bevel);
+
+  /* the interference film survives the wreck, dimmed */
+  base += vCol.rgb * (0.075 + 0.085*lam) * bevel * (1.0 - burn*0.55);
+  base += vCol.rgb * pow(lam, 5.0) * 0.16;
+
+  /* structure: the spar line that ran through this section */
+  float spar = 1.0 - smoothstep(0.0, 0.020, abs(q.y) - 0.02*vSpan);
+  base *= 1.0 - 0.18*spar*bevel;
+
+  /* scorching, heaviest at the torn end */
+  base *= 1.0 - 0.40*burn*smoothstep(-0.15, 0.5, dot(vP, vec2(0.7,0.7)));
+
+  float edge = (1.0 - smoothstep(0.0, w*2.0, abs(d))) * (1.0 - bevel*0.35);
+  base += mix(vec3(0.32,0.35,0.42), vCol.rgb, 0.4) * edge * (0.12 + 0.26*lam);
+
+  fragColor = vec4(base * m, m + sh*(1.0 - m));
+}`;
+
+
+/* ========================== EXPLOSION & SMOKE ============================
+   Purely cosmetic, so it lives outside the lockstep state: it is *triggered*
+   deterministically (a ship dies on every peer at the same substep) but the
+   puffs themselves never enter the state hash or the resync payload. */
+const VS_PUFF = `#version 300 es
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 aPos;      // x, y, radius, opacity
+layout(location=2) in vec4 aCol;      // rgb, seed
+uniform vec2 uRes; uniform float uH; uniform vec2 uOff; uniform vec2 uJitter;
+out vec2 vP; out vec4 vCol; out float vA; out float vScale;
+void main(){
+  vec2 world = aPos.xy + aCorner * aPos.z;
+  vP = aCorner; vCol = aCol; vA = aPos.w; vScale = aPos.z * uH;
+  vec2 sp = world*uH + uOff;
+  vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
+  gl_Position = vec4(clip - uJitter/uRes*2.0, 0.0, 1.0);
+}`;
+
+const FS_SMOKE = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vCol; in float vA; in float vScale;
+out vec4 fragColor;
+float h21(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
+float vn(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y);
+}
+float fbm3(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<3;i++){ s+=a*vn(p); p*=2.03; a*=0.5; } return s; }
+void main(){
+  float r = length(vP);
+  if (r > 1.0) { fragColor = vec4(0.0); return; }
+  /* a billow, not a disc: the edge is eaten away by noise that turns over as
+     the puff ages, so a plume churns instead of scaling uniformly */
+  vec2 q = vP * 1.6 + vCol.a * 31.0;
+  float n = fbm3(q + vec2(vCol.a*7.0, -vCol.a*5.0));
+  float edge = 1.0 - smoothstep(0.35, 1.0, r + (n - 0.5) * 0.75);
+  float body = edge * edge;
+  if (body < 0.003) { fragColor = vec4(0.0); return; }
+
+  /* lit from the upper-left like everything else, denser toward the core */
+  float lit = 0.55 + 0.45 * dot(normalize(vec3(vP, 0.85)), normalize(vec3(-0.6,-0.75,0.6)));
+  vec3 col = vCol.rgb * (0.55 + 0.75*lit) * (0.65 + 0.5*n);
+  float a = body * vA;
+  fragColor = vec4(col * a, a);            // premultiplied
+}`;
+
+const FS_SPARK = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vCol; in float vA; in float vScale;
+out vec4 fragColor;
+void main(){
+  float r = length(vP);
+  if (r > 1.0) { fragColor = vec4(0.0); return; }
+  float core = exp(-r*r*16.0);
+  float glow = 1.0/(1.0 + r*r*26.0); glow *= glow;
+  /* a four-point flare, so a hot ember reads as light rather than as a dot */
+  float sp = pow(max(0.0,1.0-abs(vP.y)*26.0),3.0)*exp(-abs(vP.x)*2.6)
+           + pow(max(0.0,1.0-abs(vP.x)*26.0),3.0)*exp(-abs(vP.y)*2.6);
+  float win = smoothstep(1.0, 0.5, r);
+  vec3 c = mix(vCol.rgb, vec3(1.0), clamp(core*1.3,0.0,1.0)*0.7);
+  fragColor = vec4(c * (core*1.5 + glow*0.35 + sp*0.5) * vA * win, 1.0);
+}`;
+
 /* --------------------------------- programs ------------------------------- */
 const pEnv   = prog(VS_FULL, FS_ENV);
 const pBeam  = prog(VS_BEAM, FS_BEAM);
@@ -2248,6 +2534,9 @@ const pUp    = prog(VS_FULL, FS_UP);
 const pStreak= prog(VS_FULL, FS_STREAK);
 const pComp  = prog(VS_FULL, FS_COMP);
 const pAccum = prog(VS_FULL, FS_ACCUM);
+const pDebris = prog(VS_DEBRIS, FS_DEBRIS);
+const pSmoke  = prog(VS_PUFF, FS_SMOKE);
+const pSpark  = prog(VS_PUFF, FS_SPARK);
 
 /* ------------------------------- geometry buf ----------------------------- */
 const quadBuf = gl.createBuffer();
@@ -2274,6 +2563,49 @@ gl.bindBuffer(gl.ARRAY_BUFFER, hotBuf);
 gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 24, 0);  gl.vertexAttribDivisor(1, 1);
 gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 24, 8);  gl.vertexAttribDivisor(2, 1);
 gl.bindVertexArray(null);
+
+const debrisBuf = gl.createBuffer();
+const vaoDebris = gl.createVertexArray();
+gl.bindVertexArray(vaoDebris);
+gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
+gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 48, 0);  gl.vertexAttribDivisor(1, 1);
+gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 48, 16); gl.vertexAttribDivisor(2, 1);
+gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 48, 32); gl.vertexAttribDivisor(3, 1);
+gl.bindVertexArray(null);
+
+function makePuffVao() {
+  const buf = gl.createBuffer();
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 0);  gl.vertexAttribDivisor(1, 1);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16); gl.vertexAttribDivisor(2, 1);
+  gl.bindVertexArray(null);
+  return { buf, vao };
+}
+const smokeGL = makePuffVao(), sparkGL = makePuffVao();
+let puffData = new Float32Array(512 * 8);
+
+/** Upload a particle list and draw it instanced. */
+function drawPuffs(prog, glo, list, pack) {
+  if (!list.length) return;
+  if (puffData.length < list.length * 8) puffData = new Float32Array(list.length * 8);
+  for (let i = 0; i < list.length; i++) pack(list[i], i * 8, puffData);
+  gl.bindBuffer(gl.ARRAY_BUFFER, glo.buf);
+  gl.bufferData(gl.ARRAY_BUFFER, puffData.subarray(0, list.length * 8), gl.DYNAMIC_DRAW);
+  gl.useProgram(prog.p);
+  gl.uniform2f(prog.u.uRes, W, H);
+  gl.uniform1f(prog.u.uH, viewScale);
+  gl.uniform2f(prog.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(prog.u.uJitter, jitterX, jitterY);
+  gl.bindVertexArray(glo.vao);
+  gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, list.length);
+  gl.bindVertexArray(null);
+}
 
 const vaoEmpty = gl.createVertexArray();
 
@@ -2404,6 +2736,8 @@ function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % 
 function resetAccum() { accN = 0; }
 let hoverDisc = 0, hoverEm = -1, lastHoverDisc = 0, lastHoverEm = -1;
 
+let debrisData = new Float32Array(64 * 12);
+let jitterX = 0, jitterY = 0;
 const prismUni = new Float32Array(16), prism2Uni = new Float32Array(16);
 const shipUni = new Float32Array(16), shipAUni = new Float32Array(16), shipCUni = new Float32Array(16);
 
@@ -2433,6 +2767,7 @@ function render(dt) {
   }
   const jx = halton(accN + 1, 2) - 0.5;
   const jy = halton(accN + 1, 3) - 0.5;
+  jitterX = jx; jitterY = jy;
 
   blit(pEnv, fboScene, u => {
     gl.uniform2f(u.uJitter, jx, jy);
@@ -2453,6 +2788,49 @@ function render(dt) {
     gl.uniform1f(u.uHover, hoverDisc);
     gl.uniform2f(u.uHoverEm, hoverEm, 1);
   });
+
+  /* ---- 1b. wreckage (alpha, under the beams) ---- */
+  const dbg = (G.state && G.state.debris) || [];
+  if (dbg.length) {
+    if (debrisData.length < dbg.length * 12) debrisData = new Float32Array(dbg.length * 12);
+    for (let i = 0; i < dbg.length; i++) {
+      const d = dbg[i], L = LIVERY[d.idx % LIVERY.length], o = i * 12;
+      debrisData[o] = d.x; debrisData[o+1] = d.y; debrisData[o+2] = d.rot; debrisData[o+3] = d.size;
+      debrisData[o+4] = L.rgb[0]; debrisData[o+5] = L.rgb[1]; debrisData[o+6] = L.rgb[2];
+      debrisData[o+7] = d.burn;
+      debrisData[o+8] = d.shape; debrisData[o+9] = d.part; debrisData[o+10] = 0; debrisData[o+11] = 0;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, debrisData.subarray(0, dbg.length * 12), gl.DYNAMIC_DRAW);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
+    gl.useProgram(pDebris.p);
+    gl.uniform2f(pDebris.u.uRes, W, H);
+    gl.uniform1f(pDebris.u.uH, viewScale);
+    gl.uniform2f(pDebris.u.uOff, viewOffX, viewOffY);
+    gl.uniform2f(pDebris.u.uJitter, jx, jy);
+    gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
+    gl.bindVertexArray(vaoDebris);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, dbg.length);
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+  }
+
+  /* ---- 1c. smoke (alpha, beneath the beams) ---- */
+  if (vfx.puffs.length) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    drawPuffs(pSmoke, smokeGL, vfx.puffs, (p, o, a) => {
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
+      a[o+4] = p.cr; a[o+5] = p.cg; a[o+6] = p.cb; a[o+7] = p.seed;
+    });
+    gl.disable(gl.BLEND);
+  }
 
   /* ---- 2. beams (additive) ---- */
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
@@ -2482,6 +2860,13 @@ function render(dt) {
   gl.uniform1f(pHot.u.uSize, 0.0090 * beamW);
   gl.bindVertexArray(vaoHot);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, hotCount);
+
+  if (vfx.sparks.length) {
+    drawPuffs(pSpark, sparkGL, vfx.sparks, (p, o, a) => {
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
+      a[o+4] = p.cr; a[o+5] = p.cg; a[o+6] = p.cb; a[o+7] = p.seed;
+    });
+  }
 
   gl.disable(gl.BLEND);
   gl.bindVertexArray(null);
@@ -3623,6 +4008,95 @@ function addPreviewBeam() {
   }
 }
 
+/* ====================== destruction: explosion & smoke ====================
+   Cosmetic only. The *trigger* is deterministic — a ship dies on the same
+   substep on every peer — but the particles never enter the state hash or the
+   resync payload, so they can run at frame rate and vary harmlessly per client. */
+const vfx = { puffs: [], sparks: [] };
+let vfxSeed = 1;
+function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
+
+function spawnDestruction(sh) {
+  const L = LIVERY[sh.idx % LIVERY.length];
+  const R = RULES.HULL_R;
+
+  /* the flash: brief, white-hot, and large enough to bloom */
+  vfx.sparks.push({ x: sh.x, y: sh.y, r: R * 3.2, a: 1, t: 0, life: 0.16,
+                    cr: 1, cg: 0.95, cb: 0.85, seed: vrnd(), kind: 'flash', r0: R * 3.2, r1: R * 7.5 });
+
+  /* embers: hot, fast, short-lived, tinted by the livery they came off */
+  for (let i = 0; i < 34; i++) {
+    const a = vrnd() * TAU, sp = (0.12 + vrnd() * 0.55);
+    const heat = 0.55 + vrnd() * 0.45;
+    vfx.sparks.push({
+      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      r: R * (0.10 + vrnd() * 0.16), a: 1, t: 0, life: 0.5 + vrnd() * 1.4,
+      cr: 1.0 * heat, cg: (0.55 + 0.3 * vrnd()) * heat, cb: (0.18 + 0.25 * L[2]) * heat,
+      seed: vrnd(), kind: 'ember', drag: 1.1 + vrnd() * 1.4,
+    });
+  }
+
+  /* the fireball, which cools into smoke */
+  for (let i = 0; i < 10; i++) {
+    const a = vrnd() * TAU, sp = 0.05 + vrnd() * 0.16;
+    vfx.puffs.push({
+      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      r: R * (0.5 + vrnd() * 0.5), r1: R * (2.4 + vrnd() * 2.2),
+      a: 0, t: 0, life: 0.55 + vrnd() * 0.5, seed: vrnd(),
+      cr: 1.0, cg: 0.42, cb: 0.12, hot: 1,
+    });
+  }
+
+  /* the smoke column proper: slower, larger, long-lived */
+  for (let i = 0; i < 26; i++) {
+    const a = vrnd() * TAU, sp = 0.012 + vrnd() * 0.075;
+    vfx.puffs.push({
+      x: sh.x + Math.cos(a) * R * 0.5, y: sh.y + Math.sin(a) * R * 0.5,
+      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.012,
+      r: R * (0.35 + vrnd() * 0.55), r1: R * (2.2 + vrnd() * 3.4),
+      a: 0, t: -vrnd() * 0.55, life: 3.2 + vrnd() * 4.5, seed: vrnd(),
+      cr: 0.10, cg: 0.095, cb: 0.10, hot: 0,
+    });
+  }
+}
+
+function stepVfx(dt) {
+  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
+    const p = vfx.puffs[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }             // staggered ignition
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.22, dt);
+    p.vx *= drag; p.vy *= drag;
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.35, dt));  // billow outward, slowing
+    if (p.hot) {
+      // the fireball cools from white through orange into soot
+      const k = 1 - u;
+      p.cr = 1.0 * k + 0.10 * u; p.cg = (0.30 + 0.55 * k * k) * k + 0.095 * u; p.cb = 0.10 * k + 0.10 * u;
+      p.a = Math.sin(Math.min(1, u * 3.2) * Math.PI * 0.5) * (1 - u) * 0.95;
+    } else {
+      p.a = Math.min(1, u * 5.0) * (1 - u) * (1 - u) * 0.5;
+    }
+  }
+  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
+    const p = vfx.sparks[i];
+    p.t += dt;
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
+    if (p.kind === 'flash') {
+      p.r = p.r0 + (p.r1 - p.r0) * u;                // an expanding shell
+      p.a = (1 - u) * (1 - u) * 2.4;
+      continue;
+    }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.02, dt * p.drag);
+    p.vx *= drag; p.vy *= drag;
+    p.a = (1 - u) * (1 - u) * (0.65 + 0.35 * Math.sin(p.t * 37 + p.seed * 20));  // ember flicker
+  }
+}
+
 /* ---------------------------------------------------------- damage feedback
    Damage accrues continuously as a beam dwells, which is legible in the fiction
    but invisible on screen. Floating numbers and a hull flash make the exchange
@@ -3773,6 +4247,12 @@ function stepResolve(dt) {
     applyHits(G.state, beamHits, msPer);
     applyCollisions(G.state, G.ctx);
   }
+  // a ship that just died throws its explosion here, once
+  for (let i = 0; i < G.state.ships.length; i++) {
+    const sh = G.state.ships[i];
+    if (!sh.alive && !sh.vfxDone) { sh.vfxDone = true; spawnDestruction(sh); }
+  }
+
   // surface the damage that accrued, in readable lumps rather than per-substep
   for (let i = 0; i < G.state.ships.length; i++) {
     const took = G.state.ships[i].tookDamage;
@@ -4235,6 +4715,8 @@ $('bStart').addEventListener('click', () => {
 function gameFrame(dt) {
   tickClock();
   if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
+  stepVfx(dt);
+  if (vfx.puffs.length || vfx.sparks.length) dirty = true;   // keep the frame live
   stepFx(dt);
   drawGizmo();
 }
