@@ -1089,9 +1089,12 @@ function trace(collectHits) {
       // dispersed fan is a continuous wash rather than N discrete lines
       const u = N === 1 ? 0.5 : (k + (vdc(k + 1) - 0.5) * 0.9) / (N - 1);
       const lam = SPEC_LO + clamp(u, 0, 1) * (SPEC_HI - SPEC_LO);
-      // ...and spread across the waist on a decorrelated sequence, so each ray
-      // samples a different part of the beam's cross-section
-      const off = (vdc3(k + 1) * 2 - 1) * BEAM_WAIST;
+      /* ...and, for the damage pass only, spread across the waist on a
+         decorrelated sequence so each ray samples a different part of the
+         cross-section. The display pass keeps every ray on the axis: the beam
+         is drawn as the hairline it should look like, while the physics still
+         knows it has width and grades a graze accordingly. */
+      const off = collectHits ? (vdc3(k + 1) * 2 - 1) * BEAM_WAIST : 0;
       castRay(bx + nx * off, by + ny * off, dx, dy, waveRGB(lam), pw, lam, si, collectHits);
     }
   }
@@ -1279,6 +1282,7 @@ uniform vec4  uShipB[4];     // thrust 0..1, speed 0..1, -, -
 uniform int   uSelf;         // the local player's ship index
 uniform float uHover;
 uniform vec2  uHoverEm;
+uniform sampler2D uGround;   // fire + wreckage, lying on the deck
 uniform int   uNFireL;
 uniform vec4  uFireL[4];      // x, y, falloff radius, intensity
 ${GLSL_NOISE}
@@ -2257,6 +2261,15 @@ void main(){
     prismShadow(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x); }
   for (int i=0;i<4;i++){ if(i>=uNPrism) break;
     prismSurface(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x, uPrism2[i].w); }
+  /* Everything lying on the deck — the fireball and the wreckage — is
+     composited here, BEFORE the ships, because the ships are flying over it.
+     It is sampled at the raw fragment position: the jitter is already baked
+     into that layer, and applying it twice would blur it. */
+  {
+    vec4 g = texture(uGround, gl_FragCoord.xy / uRes);
+    col = col * (1.0 - g.a) + g.rgb;
+  }
+
   for (int i=0;i<4;i++){ if(i>=uNShip) break; shipDraw(col, P, px, i); }
 
   /* --- everything in the arena is lit by a burning wreck --------------------
@@ -3164,15 +3177,16 @@ let W = 0, H = 0, DPR = 1;
 /* The scene is authored in a canonical 16:9 design space (x 0..16/9, y 0..1) and
    fitted into whatever viewport we get, so the composition survives ultrawide,
    portrait and square without anything sliding out of frame. */
-let fboScene = null, mips = [], fboStreakA = null, fboStreakB = null;
+let fboScene = null, fboGround = null, mips = [], fboStreakA = null, fboStreakB = null;
 let fboAcc = [null, null], accIdx = 0, accN = 0;
 
 function allocTargets(w, h) {
   const del = f => { if (f) { gl.deleteTexture(f.tex); gl.deleteFramebuffer(f.fb); } };
-  del(fboScene); mips.forEach(del); del(fboStreakA); del(fboStreakB);
+  del(fboScene); del(fboGround); mips.forEach(del); del(fboStreakA); del(fboStreakB);
   fboAcc.forEach(del);
   mips = [];
   fboScene = makeFBO(w, h, HDR_FMT, HDR_TYPE);
+  fboGround = makeFBO(w, h, HDR_FMT, HDR_TYPE);
   fboAcc = [makeFBO(w, h, HDR_FMT, HDR_TYPE), makeFBO(w, h, HDR_FMT, HDR_TYPE)];
   accN = 0;
   let mw = Math.max(1, w >> 1), mh = Math.max(1, h >> 1);
@@ -3305,6 +3319,96 @@ function render(dt) {
   if (hoverDisc !== lastHoverDisc || hoverEm !== lastHoverEm) { lastHoverDisc = hoverDisc; lastHoverEm = hoverEm; resetAccum(); }
   if (dirty) { trace(false); addPreviewBeam(); dirty = false; uploadSegs(); resetAccum(); }
 
+
+
+  const jx = halton(accN + 1, 2) - 0.5;
+  const jy = halton(accN + 1, 3) - 0.5;
+  jitterX = jx; jitterY = jy;
+
+  /* Two frequencies plus a slow sway, so it reads as a airframe shuddering
+     under load rather than as a uniform buzz. */
+  if (shakeAmp > 0.0005) {
+    const a = shakeAmp * viewScale * 0.0092;   // a sixth of the original kick
+    renderOffX = viewOffX + a * (Math.sin(time * 137.0) * 0.7 + Math.sin(time * 61.3) * 0.5);
+    renderOffY = viewOffY + a * (Math.cos(time * 119.0) * 0.7 + Math.cos(time * 47.9) * 0.5);
+  } else { renderOffX = viewOffX; renderOffY = viewOffY; }
+
+  /* The fireballs still burning, as lights. Computed once and used by both the
+     environment pass (deck, prisms, living ships) and the wreckage pass. */
+  nFireL = 0;
+  for (const w of vfx.wrecks) {
+    if (nFireL >= 4) break;
+    const k = Math.max(0, 1 - w.t / 0.95);
+    const inten = k * k * 4.2 * (0.85 + 0.15 * Math.sin(time * 21 + w.idx));
+    if (inten < 0.01) continue;
+    fireLUni[nFireL*4] = w.x; fireLUni[nFireL*4+1] = w.y;
+    fireLUni[nFireL*4+2] = RULES.HULL_R * 7.0; fireLUni[nFireL*4+3] = inten;
+    nFireL++;
+  }
+
+  /* ---- 0a. the ground layer -------------------------------------------
+     Fire and wreckage lie on the deck, so they are drawn into their own target
+     and composited underneath the ships by the environment pass. Drawing them
+     after the environment put burning debris on top of ships flying over it. */
+  gl.bindFramebuffer(gl.FRAMEBUFFER, fboGround.fb);
+  gl.viewport(0, 0, W, H);
+  gl.clearColor(0, 0, 0, 0);
+  gl.clear(gl.COLOR_BUFFER_BIT);
+
+  /* ---- 0b. fireball and deck scorch (alpha, under the wreckage) ----
+     The fire goes down first: wreckage is thrown clear of it and reads in
+     front of it, which is what makes the two look like one event. */
+  if (vfx.fire.length) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboGround.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
+    drawPuffs(pFire, fireGL, vfx.fire, (p, o, a) => {
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
+      a[o+4] = 0; a[o+5] = 0; a[o+6] = 0; a[o+7] = p.seed;
+      a[o+8] = Math.min(1, p.t / p.life); a[o+9] = p.T || 0; a[o+10] = p.kind; a[o+11] = p.rot;
+    });
+    gl.disable(gl.BLEND);
+  }
+
+  /* ---- 0c. wreckage (alpha, over the fire and under the ships) ---- */
+  const dbg = (G.state && G.state.debris) || [];
+  if (dbg.length) {
+    if (debrisData.length < dbg.length * 12) debrisData = new Float32Array(dbg.length * 12);
+    for (let i = 0; i < dbg.length; i++) {
+      const d = dbg[i], L = LIVERY[d.idx % LIVERY.length], o = i * 12;
+      debrisData[o] = d.x; debrisData[o+1] = d.y; debrisData[o+2] = d.rot; debrisData[o+3] = d.size;
+      debrisData[o+4] = L.rgb[0]; debrisData[o+5] = L.rgb[1]; debrisData[o+6] = L.rgb[2];
+      debrisData[o+7] = d.burn;
+      // heat is a client-side clock keyed by ship: the wreck cools on screen
+      // without the debris itself growing a cosmetic field
+      const ht = wreckHeat(d.idx) * (0.35 + 0.65 * d.burn);
+      const fk = 0.72 + 0.28 * Math.sin(time * 9.0 + d.shape * 31.0)
+                             * Math.sin(time * 3.1 + d.shape * 11.0);
+      debrisData[o+8] = d.shape; debrisData[o+9] = d.part; debrisData[o+10] = ht; debrisData[o+11] = fk;
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, debrisData.subarray(0, dbg.length * 12), gl.DYNAMIC_DRAW);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboGround.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
+    gl.useProgram(pDebris.p);
+    gl.uniform2f(pDebris.u.uRes, W, H);
+    gl.uniform1f(pDebris.u.uH, viewScale);
+    gl.uniform2f(pDebris.u.uOff, renderOffX, renderOffY);
+    gl.uniform2f(pDebris.u.uJitter, jx, jy);
+    gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
+    gl.uniform4fv(pDebris.u.uFireL, fireLUni);
+    gl.uniform1i(pDebris.u.uNFireL, nFireL);
+    gl.bindVertexArray(vaoDebris);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, dbg.length);
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+  }
+
+
   /* ---- 1. environment ---- */
   for (let i = 0; i < 4; i++) {
     const P = arena.prisms[i];
@@ -3327,31 +3431,6 @@ function render(dt) {
       shipBUni[i*4]=thr; shipBUni[i*4+1]=S.speed/RULES.SPEED_MAX; shipBUni[i*4+2]=0; shipBUni[i*4+3]=0;
     } else { for (let k=0;k<4;k++){ shipUni[i*4+k]=0; shipAUni[i*4+k]=0; shipCUni[i*4+k]=0; shipBUni[i*4+k]=0; } }
   }
-  const jx = halton(accN + 1, 2) - 0.5;
-  const jy = halton(accN + 1, 3) - 0.5;
-  jitterX = jx; jitterY = jy;
-
-  /* Two frequencies plus a slow sway, so it reads as a airframe shuddering
-     under load rather than as a uniform buzz. */
-  if (shakeAmp > 0.0005) {
-    const a = shakeAmp * viewScale * 0.055;
-    renderOffX = viewOffX + a * (Math.sin(time * 137.0) * 0.7 + Math.sin(time * 61.3) * 0.5);
-    renderOffY = viewOffY + a * (Math.cos(time * 119.0) * 0.7 + Math.cos(time * 47.9) * 0.5);
-  } else { renderOffX = viewOffX; renderOffY = viewOffY; }
-
-  /* The fireballs still burning, as lights. Computed once and used by both the
-     environment pass (deck, prisms, living ships) and the wreckage pass. */
-  nFireL = 0;
-  for (const w of vfx.wrecks) {
-    if (nFireL >= 4) break;
-    const k = Math.max(0, 1 - w.t / 0.95);
-    const inten = k * k * 4.2 * (0.85 + 0.15 * Math.sin(time * 21 + w.idx));
-    if (inten < 0.01) continue;
-    fireLUni[nFireL*4] = w.x; fireLUni[nFireL*4+1] = w.y;
-    fireLUni[nFireL*4+2] = RULES.HULL_R * 7.0; fireLUni[nFireL*4+3] = inten;
-    nFireL++;
-  }
-
   blit(pEnv, fboScene, u => {
     gl.uniform2f(u.uJitter, jx, jy);
     gl.uniform2f(u.uRes, W, H);
@@ -3373,60 +3452,8 @@ function render(dt) {
     gl.uniform2f(u.uHoverEm, hoverEm, 1);
     gl.uniform4fv(u.uFireL, fireLUni);
     gl.uniform1i(u.uNFireL, nFireL);
+    bindTex(u.uGround, fboGround.tex, 3);
   });
-
-  /* ---- 1b. fireball and deck scorch (alpha, under the wreckage) ----
-     The fire goes down first: wreckage is thrown clear of it and reads in
-     front of it, which is what makes the two look like one event. */
-  if (vfx.fire.length) {
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
-    gl.viewport(0, 0, W, H);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
-    drawPuffs(pFire, fireGL, vfx.fire, (p, o, a) => {
-      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
-      a[o+4] = 0; a[o+5] = 0; a[o+6] = 0; a[o+7] = p.seed;
-      a[o+8] = Math.min(1, p.t / p.life); a[o+9] = p.T || 0; a[o+10] = p.kind; a[o+11] = p.rot;
-    });
-    gl.disable(gl.BLEND);
-  }
-
-  /* ---- 1c. wreckage (alpha, under the beams) ---- */
-  const dbg = (G.state && G.state.debris) || [];
-  if (dbg.length) {
-    if (debrisData.length < dbg.length * 12) debrisData = new Float32Array(dbg.length * 12);
-    for (let i = 0; i < dbg.length; i++) {
-      const d = dbg[i], L = LIVERY[d.idx % LIVERY.length], o = i * 12;
-      debrisData[o] = d.x; debrisData[o+1] = d.y; debrisData[o+2] = d.rot; debrisData[o+3] = d.size;
-      debrisData[o+4] = L.rgb[0]; debrisData[o+5] = L.rgb[1]; debrisData[o+6] = L.rgb[2];
-      debrisData[o+7] = d.burn;
-      // heat is a client-side clock keyed by ship: the wreck cools on screen
-      // without the debris itself growing a cosmetic field
-      const ht = wreckHeat(d.idx) * (0.35 + 0.65 * d.burn);
-      const fk = 0.72 + 0.28 * Math.sin(time * 9.0 + d.shape * 31.0)
-                             * Math.sin(time * 3.1 + d.shape * 11.0);
-      debrisData[o+8] = d.shape; debrisData[o+9] = d.part; debrisData[o+10] = ht; debrisData[o+11] = fk;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, debrisData.subarray(0, dbg.length * 12), gl.DYNAMIC_DRAW);
-
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
-    gl.viewport(0, 0, W, H);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
-    gl.useProgram(pDebris.p);
-    gl.uniform2f(pDebris.u.uRes, W, H);
-    gl.uniform1f(pDebris.u.uH, viewScale);
-    gl.uniform2f(pDebris.u.uOff, renderOffX, renderOffY);
-    gl.uniform2f(pDebris.u.uJitter, jx, jy);
-    gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
-    gl.uniform4fv(pDebris.u.uFireL, fireLUni);
-    gl.uniform1i(pDebris.u.uNFireL, nFireL);
-    gl.bindVertexArray(vaoDebris);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, dbg.length);
-    gl.bindVertexArray(null);
-    gl.disable(gl.BLEND);
-  }
 
   /* ---- 1d. smoke (alpha, over the wreckage, beneath the beams) ---- */
   if (vfx.puffs.length) {
@@ -4660,6 +4687,7 @@ function addPreviewBeam() {
      6-30   a soot scorch and the last of the column, thinning.                */
 const vfx = { fire: [], puffs: [], sparks: [], glows: [], wrecks: [] };
 let vfxSeed = 1;
+let fireShake = 0, hitShake = 0;
 function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
 function vrng(a, b) { return a + (b - a) * vrnd(); }
 /** Live particle count, so four wrecks on screen at once cost about what one
@@ -5175,6 +5203,10 @@ function stepResolve(dt) {
     const took = G.state.ships[i].tookDamage;
     const delta = took - dmgSince[i];
     if (delta <= 0) continue;
+    /* Taking fire rattles your airframe too, but only while the rays are
+       actually on you, and far more gently than discharging your own
+       capacitor. The impulse is proportional to how hard you are being hit. */
+    if (i === G.selfIdx) hitShake = Math.min(0.42, hitShake + delta * 0.055);
     dmgAccum[i] += delta; dmgSince[i] = took;
     if (dmgAccum[i] >= 6) { spawnDamage(i, dmgAccum[i]); dmgAccum[i] = 0; }
   }
@@ -5648,7 +5680,10 @@ function gameFrame(dt) {
   const firing = G.phase === 'resolve' && me && me.alive && me.firing;
   const target = firing ? 1 : 0;
   const rate = firing ? 9.0 : 3.2;
-  shakeAmp += (target - shakeAmp) * Math.min(1, dt * rate);
+  fireShake += (target - fireShake) * Math.min(1, dt * rate);
+  // being hit decays fast: it should stop the instant the beam leaves you
+  hitShake *= Math.pow(0.008, dt);
+  shakeAmp = Math.min(1.15, fireShake + hitShake);
   if (shakeAmp > 0.0005) dirty = true;
   stepFx(dt);
   drawGizmo();

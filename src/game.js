@@ -211,6 +211,7 @@ function addPreviewBeam() {
      6-30   a soot scorch and the last of the column, thinning.                */
 const vfx = { fire: [], puffs: [], sparks: [], glows: [], wrecks: [] };
 let vfxSeed = 1;
+let fireShake = 0, hitShake = 0;
 function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
 function vrng(a, b) { return a + (b - a) * vrnd(); }
 /** Live particle count, so four wrecks on screen at once cost about what one
@@ -726,6 +727,10 @@ function stepResolve(dt) {
     const took = G.state.ships[i].tookDamage;
     const delta = took - dmgSince[i];
     if (delta <= 0) continue;
+    /* Taking fire rattles your airframe too, but only while the rays are
+       actually on you, and far more gently than discharging your own
+       capacitor. The impulse is proportional to how hard you are being hit. */
+    if (i === G.selfIdx) hitShake = Math.min(0.42, hitShake + delta * 0.055);
     dmgAccum[i] += delta; dmgSince[i] = took;
     if (dmgAccum[i] >= 6) { spawnDamage(i, dmgAccum[i]); dmgAccum[i] = 0; }
   }
@@ -1199,7 +1204,10 @@ function gameFrame(dt) {
   const firing = G.phase === 'resolve' && me && me.alive && me.firing;
   const target = firing ? 1 : 0;
   const rate = firing ? 9.0 : 3.2;
-  shakeAmp += (target - shakeAmp) * Math.min(1, dt * rate);
+  fireShake += (target - fireShake) * Math.min(1, dt * rate);
+  // being hit decays fast: it should stop the instant the beam leaves you
+  hitShake *= Math.pow(0.008, dt);
+  shakeAmp = Math.min(1.15, fireShake + hitShake);
   if (shakeAmp > 0.0005) dirty = true;
   stepFx(dt);
   drawGizmo();
