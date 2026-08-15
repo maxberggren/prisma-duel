@@ -121,7 +121,8 @@ function drawGizmo() {
   const sh = selfShip();
   const m = legalNow();
 
-  const sig = [sh.x, sh.y, sh.heading, sh.speed, m.heading, m.speed, m.thrust, W, H].join(',');
+  const sig = [sh.x, sh.y, sh.heading, sh.speed, m.heading, m.speed, m.thrust,
+               W, H, viewScale, viewOffX, viewOffY].join(',');
   if (sig === gizSig) return;
   gizSig = sig;
 
@@ -229,7 +230,8 @@ function commitOrders() {
   const sh = selfShip();
   if (!sh || !sh.alive) return;
   committed = true;
-  const move = { heading: G.aim.heading, speed: G.aim.speed, thrust: G.aim.thrust, fire: G.aim.fire };
+  const move = { heading: G.aim.heading, speed: G.aim.speed, thrust: G.aim.thrust,
+                 fire: G.aim.fire, h: stateHash(G.state), sig: RULES_SIG };
   G.moves[sh.id] = move;
   if (NET.live) NET.sendMove(G.state.turn, move);
   syncOrderUI(); renderRoster();
@@ -460,14 +462,85 @@ document.addEventListener('visibilitychange', () => endDrag());
 canvas.addEventListener('contextmenu', e => { e.preventDefault(); endDrag(); });
 gizEl.addEventListener('contextmenu', e => { e.preventDefault(); endDrag(); });
 
-/* click the arena to point your nose at a spot */
-canvas.addEventListener('pointerdown', ev => {
-  if (!startsDrag(ev) || committed || G.phase !== 'plan') return;
+/* ------------------------------------------------------- camera: pan & zoom
+   A left-drag on the arena pans; a left *click* (moved under the threshold)
+   still points your nose at the spot. Middle button, right button or shift
+   always pan. The wheel zooms about the cursor. */
+let camDrag = null;
+const CLICK_SLOP = 5;                         // css px before a click becomes a drag
+
+function aimAtPoint(clientX, clientY) {
+  if (committed || G.phase !== 'plan') return;
   const sh = selfShip(); if (!sh || !sh.alive) return;
-  const p = s2w(ev.clientX, ev.clientY);
+  const p = s2w(clientX, clientY);
   G.aim.heading = Math.atan2(p.y - sh.y, p.x - sh.x);
   syncOrderUI(); gizSig = ''; dirty = true; wakeGiz();
+}
+
+canvas.addEventListener('pointerdown', ev => {
+  if (!ev.isPrimary || camDrag) return;
+  const forcePan = ev.button === 1 || ev.button === 2 || ev.shiftKey;
+  if (ev.button !== 0 && !forcePan) return;
+  camDrag = { id: ev.pointerId, x0: ev.clientX, y0: ev.clientY,
+              lx: ev.clientX, ly: ev.clientY, moved: 0, pan: forcePan };
+  canvas.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
+  wakeGiz();
 });
+addEventListener('pointermove', ev => {
+  if (!camDrag || ev.pointerId !== camDrag.id) return;
+  const dx = ev.clientX - camDrag.lx, dy = ev.clientY - camDrag.ly;
+  camDrag.lx = ev.clientX; camDrag.ly = ev.clientY;
+  camDrag.moved += Math.hypot(dx, dy);
+  if (!camDrag.pan && camDrag.moved > CLICK_SLOP) camDrag.pan = true;
+  if (camDrag.pan) { panBy(dx, dy); canvas.style.cursor = 'grabbing'; gizSig = ''; }
+});
+function endCamDrag(ev) {
+  if (!camDrag) return;
+  if (ev && ev.pointerId !== undefined && ev.pointerId !== camDrag.id) return;
+  canvas.style.cursor = '';
+  if (canvas.hasPointerCapture && canvas.hasPointerCapture(camDrag.id))
+    canvas.releasePointerCapture(camDrag.id);
+  if (!camDrag.pan) aimAtPoint(camDrag.x0, camDrag.y0);
+  camDrag = null;
+}
+addEventListener('pointerup', endCamDrag);
+addEventListener('pointercancel', endCamDrag);
+addEventListener('blur', () => endCamDrag());
+
+canvas.addEventListener('wheel', ev => {
+  if (ev.ctrlKey) return;                     // leave browser zoom alone
+  ev.preventDefault();
+  let d = ev.deltaY;
+  if (ev.deltaMode === 1) d *= 16;            // lines
+  else if (ev.deltaMode === 2) d *= 380;      // pages
+  d = clamp(d, -140, 140);                    // one inertial flick must not slam the limit
+  const r = canvas.getBoundingClientRect();
+  zoomAt(ev.clientX - r.left, ev.clientY - r.top, Math.exp(-d * 0.0022));
+  gizSig = '';
+  wakeGiz();
+}, { passive: false });
+
+/* two-finger pinch on touch */
+let pinch = null;
+canvas.addEventListener('touchstart', ev => {
+  if (ev.touches.length !== 2) { pinch = null; return; }
+  const [a, b] = ev.touches;
+  pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) };
+}, { passive: true });
+canvas.addEventListener('touchmove', ev => {
+  if (!pinch || ev.touches.length !== 2) return;
+  const [a, b] = ev.touches;
+  const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  if (pinch.d > 0) {
+    const r = canvas.getBoundingClientRect();
+    zoomAt((a.clientX + b.clientX) * 0.5 - r.left, (a.clientY + b.clientY) * 0.5 - r.top, d / pinch.d);
+    gizSig = '';
+  }
+  pinch.d = d;
+  ev.preventDefault();
+}, { passive: false });
+canvas.addEventListener('touchend', () => { pinch = null; }, { passive: true });
 
 /* sliders */
 function bindRange(el, get, set) {
@@ -493,6 +566,7 @@ addEventListener('keydown', ev => {
   if (k === 'f') { if (!oFire.disabled) { G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true; } }
   else if (ev.key === 'Enter') commitOrders();
   else if (k === 'h') ui.classList.toggle('hidden');
+  else if (k === '0') resetView();
   else return;
   ev.preventDefault();
 });
@@ -518,21 +592,90 @@ const NET = {
   sendResolve: (t, m) => { try { Net.sendResolve(t, m); } catch (e) { console.warn(e); } },
 };
 
+/* ---------------------------------------------------------------- resync
+   A desync in lockstep is normally fatal — there is no authority to fall back
+   on. Rather than let the match quietly become two different games, a client
+   that notices its fingerprint disagreeing asks the arbiter for the real state
+   and adopts it wholesale. It is a visible hiccup instead of a ruined match. */
+function serialiseState() {
+  const st = G.state;
+  return {
+    turn: st.turn, inset: st.inset || 0, seed: st.seed,
+    prisms: st.arena.prisms.map(p => ({ x: p.x, y: p.y, r: p.r, wdir: p.wdir,
+                                        whalf: p.whalf, ior: p.ior, disp: p.disp, spin: p.spin })),
+    ships: st.ships.map(s => ({ id: s.id, name: s.name, idx: s.idx, x: s.x, y: s.y,
+                                heading: s.heading, speed: s.speed, shield: s.shield,
+                                hull: s.hull, charge: s.charge, alive: s.alive, move: s.move })),
+  };
+}
+function adoptState(d) {
+  const st = G.state;
+  st.turn = d.turn; st.inset = d.inset; st.seed = d.seed;
+  st.arena.prisms.length = 0;
+  for (const p of d.prisms) st.arena.prisms.push({ ...p });
+  for (const sd of d.ships) {
+    const sh = st.ships.find(x => x.id === sd.id);
+    if (!sh) continue;
+    Object.assign(sh, sd, { firing: false, tookDamage: 0, dealtDamage: 0, firedThisTurn: false });
+  }
+  arena.prisms = st.arena.prisms;
+  arena.ships = st.ships;
+  desynced = false;
+  G.phase = 'resolve';        // beginPlan() will take it from here
+  beginPlan();
+  banner('', '');
+  setStatus('');
+  flash('RESYNCED');
+}
+
+function reportDesync(why) {
+  if (desynced) return;
+  desynced = true;
+  banner('OUT OF SYNC', why);
+  if (!NET.isArbiter()) Net.sendChat(RESYNC_REQ);   // ask the arbiter for the truth
+  else banner('OUT OF SYNC', 'A PILOT IS ON A DIFFERENT BUILD');
+}
+
 function wireNet() {
   if (typeof Net === 'undefined') return false;
+
   Net.on('move', ({ turn, peerId, move }) => {
     if (!G.state || turn !== G.state.turn) return;
     const sh = G.state.ships.find(s => s.id === peerId);
     if (!sh) return;
+
+    /* Two cheap consistency checks, riding along with a message we already
+       send. `sig` catches a peer on a different build; `h` catches every other
+       cause of divergence at the earliest moment it can be observed. */
+    if (move.sig && move.sig !== RULES_SIG) {
+      reportDesync('DIFFERENT BUILD: ' + move.sig + ' vs ' + RULES_SIG);
+    } else if (move.h !== undefined && move.h !== stateHash(G.state)) {
+      reportDesync('TURN ' + turn + ' STATE MISMATCH');
+    }
+
     G.moves[sh.id] = move;
     renderRoster();
     if (NET.isArbiter()) maybeResolve();
   });
+
   Net.on('resolve', ({ turn, moves }) => {
     if (!G.state || turn !== G.state.turn || G.phase !== 'plan') return;
     G.moves = moves;
     startResolve(moves);
   });
+
+  Net.on('chat', ({ text }) => {
+    if (text.slice(0, RESYNC_REQ.length) === RESYNC_REQ) {
+      if (NET.isArbiter() && G.state) Net.sendChat(RESYNC_ST + JSON.stringify(serialiseState()));
+      return;
+    }
+    if (text.slice(0, RESYNC_ST.length) === RESYNC_ST) {
+      if (NET.isArbiter() || !G.state) return;
+      try { adoptState(JSON.parse(text.slice(RESYNC_ST.length))); }
+      catch (e) { console.warn('resync failed', e); }
+    }
+  });
+
   Net.on('status', s => setStatus(s));
   return true;
 }
@@ -562,9 +705,31 @@ let lobbyRoster = [];
    build a *different* game — different player list, different seed — and desync
    immediately. The arbiter broadcasts the roster and seed it used, and everyone
    builds the identical match from that one message. */
-const START_TAG = '\u0001START';           // 6 chars; slice by .length, never a literal
+/* Peer-to-peer lockstep has no authority, so two clients running different
+   code will silently drift apart rather than fail. These tags carry a build
+   signature and a per-turn state fingerprint so that a mismatch is detected
+   and reported instead of quietly ruining the match. */
+const START_TAG  = '\u0001START';       // slice by .length, never a literal
+const RESYNC_REQ = '\u0001RSQ';
+const RESYNC_ST  = '\u0001RST';
+
+/** Fingerprint of the rules this build was compiled with. Any balance change
+    alters it, which is exactly the class of skew that desyncs a match. */
+const RULES_SIG = (() => {
+  const src = JSON.stringify(RULES);
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < src.length; i++) { h ^= src.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
+  return h.toString(36).toUpperCase();
+})();
+let desynced = false;
 function startMatchFrom(payload) {
   if (G.state) return;                                   // already playing
+  if (payload.sig && payload.sig !== RULES_SIG) {
+    setStatus('Build mismatch — the host is running a different version of the ' +
+              'game (' + payload.sig + ' vs yours ' + RULES_SIG + '). Reload the ' +
+              'page to pick up the current build, then rejoin.', true);
+    return;
+  }
   const players = payload.players.map(p => ({ id: p.id, name: p.name }));
   const selfIdx = players.findIndex(p => p.id === Net.selfId());
   if (selfIdx < 0) { setStatus('This match started without you.', true); return; }
@@ -605,6 +770,7 @@ $('bJoin').addEventListener('click', async () => {
       if (text.slice(0, START_TAG.length) !== START_TAG) return;
       try { startMatchFrom(JSON.parse(text.slice(START_TAG.length))); } catch (e) { console.warn(e); }
     });
+    setStatus('Connected — build ' + RULES_SIG);
     refreshLobby();
   } catch (e) {
     $('bJoin').disabled = false;
@@ -620,7 +786,7 @@ $('bStart').addEventListener('click', () => {
     .slice(0, 4)
     .map(p => ({ id: p.peerId, name: p.name }));
   const seed = players.reduce((a, p) => (a * 31 + p.id) >>> 0, 20260815);
-  const payload = { players, seed };
+  const payload = { players, seed, sig: RULES_SIG };
   Net.sendChat(START_TAG + JSON.stringify(payload));
   startMatchFrom(payload);
 });
