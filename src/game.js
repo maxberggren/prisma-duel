@@ -29,6 +29,9 @@ function mk(tag, attrs) {
   svg.appendChild(e);
   return e;
 }
+/* The reachable envelope: how far you can turn and how fast you can be going
+   by the end of this turn. It is the only visualisation of what the power
+   split actually buys you, which is why it stays. */
 const gEnvelope = mk('path', { fill: 'rgba(127,216,255,.055)', stroke: 'rgba(127,216,255,.20)', 'stroke-width': 1 });
 const gTrackBk = mk('path', { fill: 'none', stroke: 'rgba(0,0,0,.55)', 'stroke-width': 4.5, 'stroke-linecap': 'round' });
 const gTrack = mk('path', { fill: 'none', stroke: '#7fd8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
@@ -577,7 +580,7 @@ function botOrders(sh) {
 
   // stay off the closing walls — being pinned against one is how bots die
   const IN = (G.state && G.state.inset) || 0;
-  const m = 0.10;
+  const m = RULES.SPEED_MAX * 1.35;      // one turn of travel, plus a little
   const cx = arena.w * 0.5, cy = arena.h * 0.5;
   const nearWall = Math.min(sh.x - IN, arena.w - IN - sh.x, sh.y - IN, arena.h - IN - sh.y);
   if (nearWall < m) {
@@ -598,13 +601,77 @@ function botOrders(sh) {
   else if (dist > 0.6) thrust = 0.85;
   else thrust = off > 0.5 ? 0.45 : 0.3;
 
-  const speed = nearWall < m ? RULES.SPEED_MAX
-              : dist > 0.5 ? RULES.SPEED_MAX * 0.85
-              : RULES.SPEED_MAX * 0.5;
+  let speed = nearWall < m ? RULES.SPEED_MAX
+            : dist > 0.5 ? RULES.SPEED_MAX * 0.85
+            : RULES.SPEED_MAX * 0.5;
+
+  /* Throttle back near anything solid. Every bot death was a "boxed in" case:
+     cornered with too much speed left to turn out of it, because turn rate
+     falls as speed rises. Room to manoeuvre is bought with the throttle. */
+  let clearance = nearWall;
+  for (const pr of arena.prisms) clearance = Math.min(clearance, prismSD(pr, sh.x, sh.y));
+  const comfort = RULES.SPEED_MAX * 1.6;
+  if (clearance < comfort) {
+    speed = Math.min(speed, RULES.SPEED_MIN +
+      (RULES.SPEED_MAX - RULES.SPEED_MIN) * clamp(clearance / comfort, 0, 1) ** 1.5);
+  }
 
   // only shoot when the nose will actually be on them
   const fire = charged && off < 0.38 && dist < 1.05;
-  return { heading: want, speed, thrust, fire };
+
+  /* Flying into a wall or a prism is fatal now, so a bot that only chases is a
+     bot that kills itself — measured, 30 of 32 deaths were crashes. Candidate
+     courses are tested through the very same integrator the simulation uses,
+     so the avoidance is exactly as accurate as the rules are. */
+  return avoidObstacles(sh, { heading: want, speed, thrust, fire });
+}
+
+function avoidObstacles(sh, move) {
+  const inset = (G.state && G.state.inset) || 0;
+  const path = m => {
+    const legal = legaliseMove(sh, m);
+    return integratePath(sh, legal, arena.w, arena.h, arena.prisms, inset);
+  };
+  /* One turn of lookahead is not enough: a course can be perfectly clear and
+     still end with the nose against a prism and no turn rate left to escape.
+     Every bot death was one of these. So a candidate only counts as safe if,
+     from where it leaves you, some continuation also survives. */
+  const survivesNextTurn = p => {
+    const end = p[RULES.SUBSTEPS];
+    const ghost = { x: end.x, y: end.y, heading: end.heading, speed: end.speed, charge: 0 };
+    for (let step = 0; step <= 5; step++) {
+      for (const sgn of (step === 0 ? [1] : [1, -1])) {
+        for (const slow of [0.45, 1]) {
+          const m2 = { heading: end.heading + sgn * step * 0.34,
+                       speed: end.speed * slow, thrust: 0.5, fire: false };
+          const l2 = legaliseMove(ghost, m2);
+          if (integratePath(ghost, l2, arena.w, arena.h, arena.prisms,
+                            arenaInset((G.state ? G.state.turn : 0) + 1)).crashAt < 0) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const p0 = path(move);
+  if (p0.crashAt < 0 && survivesNextTurn(p0)) return move;
+
+  let firstClear = null, bestAlt = null, bestCrash = -1;
+  for (let step = 1; step <= 9; step++) {
+    for (const sgn of [1, -1]) {
+      for (const slow of [1, 0.55, 0.22]) {     // slowing tightens the turn
+        const cand = { ...move, heading: move.heading + sgn * step * 0.28,
+                       speed: move.speed * slow, fire: false };
+        const pc = path(cand);
+        if (pc.crashAt < 0) {
+          if (!firstClear) firstClear = cand;            // survives this turn
+          if (survivesNextTurn(pc)) return cand;         // ...and the next
+        } else if (pc.crashAt > bestCrash) { bestCrash = pc.crashAt; bestAlt = cand; }
+      }
+    }
+  }
+  // nothing survives two turns: take one clear turn, else buy the most time
+  return firstClear || bestAlt || move;
 }
 
 function maybeResolve() {
@@ -1115,9 +1182,25 @@ $('bStart').addEventListener('click', () => {
 /* ------------------------------------------------------------- per-frame */
 function gameFrame(dt) {
   tickClock();
-  if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
-  stepVfx(dt);
-  if (vfxLoad()) dirty = true;                               // keep the frame live
+  /* Nothing in the world moves while orders are being given, so the fire and
+     smoke hold their pose too — a drifting plume over a frozen battlefield read
+     as a bug. It also lets the accumulator converge, so the planning phase is a
+     crisp supersampled still rather than a frame that re-renders forever. */
+  if (G.phase === 'resolve' && G.ctx) {
+    stepResolve(dt);
+    stepVfx(dt);
+    if (vfxLoad()) dirty = true;
+  }
+
+  /* The view shakes while YOUR ship is discharging: it is your airframe, not
+     the camera, so an opponent firing across the map does not rattle you.
+     It builds over the first moments of the burn and decays after. */
+  const me = selfShip();
+  const firing = G.phase === 'resolve' && me && me.alive && me.firing;
+  const target = firing ? 1 : 0;
+  const rate = firing ? 9.0 : 3.2;
+  shakeAmp += (target - shakeAmp) * Math.min(1, dt * rate);
+  if (shakeAmp > 0.0005) dirty = true;
   stepFx(dt);
   drawGizmo();
 }

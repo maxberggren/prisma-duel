@@ -26,16 +26,16 @@ const angDelta = (a, b) => {
 
 /* --------------------------------------------------------------- constants */
 const RULES = {
-  ARENA_W: 1.60,            // world units (1 unit = viewport height at fit)
-  ARENA_H: 0.90,
+  ARENA_W: 3.20,            // world units (1 unit = viewport height at fit)
+  ARENA_H: 1.80,
   SUBSTEPS: 96,             // fixed per turn — the source of determinism
   TURN_SECONDS: 4.0,        // real seconds a resolution animation takes
   PLAN_SECONDS: 25,         // planning window before the arbiter forces the turn
 
-  SPEED_MAX: 0.215,         // world units per turn at full thrust
+  SPEED_MAX: 0.380,         // world units per turn at full thrust
                             // (the arena is 1.6 wide, so ~7 turns to cross)
-  SPEED_MIN: 0.045,         // ships are aircraft: they cannot stop
-  ACCEL: 0.075,             // max change in commanded speed per turn
+  SPEED_MIN: 0.080,         // ships are aircraft: they cannot stop
+  ACCEL: 0.132,             // max change in commanded speed per turn
   TURN_RATE: 1.15,          // radians per turn at full thrust, low speed
   TURN_RATE_SPEED_PENALTY: 0.55,  // fraction of agility lost at max speed
 
@@ -47,7 +47,10 @@ const RULES = {
   /* Damage is per millisecond of dwell, which is what makes a graze cheap and
      a sustained lock lethal. One turn is TURN_SECONDS*1000 ms of exposure at
      most, so a perfect full-turn lock is fatal and a clip costs a few points. */
-  DPS_MS: 0.052,
+  /* A perfect full-turn lock should strip a shield and bite hull, not delete a
+     ship outright — at 0.052 the first volley of a 4-way fight killed everyone
+     simultaneously on turn 3, every match. */
+  DPS_MS: 0.032,
 
   CHARGE_MAX: 1,
   CHARGE_START: 0.55,       // nobody opens with an alpha strike
@@ -56,18 +59,18 @@ const RULES = {
 
   DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
   DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
-  HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
+  HULL_R: 0.0340,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
-  MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
+  MUZZLE_CLEAR: 0.053,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
-  COLLIDE_DMG: 26,
+  COLLIDE_DMG: 62,
 
   /* The walls close in. Without it two cautious pilots can circle forever —
      measured: a bot duel stalemated for 85 turns with both shields pinned at
      full. The mirrors closing also keeps bank shots live as space runs out. */
   RING_START: 7,            // turns of open space before the walls move
-  RING_RATE: 0.016,         // world units of inset per turn
-  RING_MAX: 0.17,
+  RING_RATE: 0.032,         // world units of inset per turn
+  RING_MAX: 0.34,
   /* Once the walls are as tight as they can go, the box itself starts to
      collapse: escalating damage to everyone, so a match always terminates.
      Without it two survivors could still circle inside the closed box —
@@ -98,32 +101,33 @@ function makeArena(seed, spawnPoints) {
     // spread them across the middle so they matter to most sight lines
     const t = (i + 0.5) / n;
     const cand = {
-      x: RULES.ARENA_W * (0.22 + 0.56 * t) + (rnd() - 0.5) * 0.10,
-      y: RULES.ARENA_H * (0.30 + 0.40 * rnd()),
-      r: 0.085 + rnd() * 0.062,
+      x: RULES.ARENA_W * (0.18 + 0.64 * t) + (rnd() - 0.5) * 0.22,
+      y: RULES.ARENA_H * (0.18 + 0.64 * rnd()),
+      r: 0.140 + rnd() * 0.105,
       wdir: rnd() * TAU,
       whalf: 0.55 + rnd() * 0.55,
       ior: 1.34 + rnd() * 0.10,
       disp: 0.045 + rnd() * 0.030,
       /* Static. A rotating prism would make the previewed bank shot a lie —
          and it could sweep over a stationary ship, putting a hull inside glass. */
+      seed: rnd(),                     // gives each disc its own film pattern
       spin: 0,
     };
     /* Nudge the prism clear of every spawn point. A ship that began inside a
        prism would fire from a muzzle buried in glass, and the trapped light
        would shred its own shield. */
     if (spawnPoints) {
-      for (let guard = 0; guard < 24; guard++) {
+      for (let guard = 0; guard < 90; guard++) {
         let worst = null, worstD = Infinity;
         for (const sp of spawnPoints) {
           const d = prismSD(cand, sp.x, sp.y);
           if (d < worstD) { worstD = d; worst = sp; }
         }
-        if (worstD > RULES.HULL_R * 3.5) break;
+        if (worstD > RULES.HULL_R * 4.5) break;
         const ax = cand.x - worst.x, ay = cand.y - worst.y;
         const al = Math.hypot(ax, ay) || 1;
-        cand.x += (ax / al) * 0.035;
-        cand.y += (ay / al) * 0.035;
+        cand.x += (ax / al) * 0.045;
+        cand.y += (ay / al) * 0.045;
         cand.x = clamp(cand.x, cand.r * 0.5, RULES.ARENA_W - cand.r * 0.5);
         cand.y = clamp(cand.y, cand.r * 0.5, RULES.ARENA_H - cand.r * 0.5);
       }
@@ -339,33 +343,38 @@ function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
   const IN = inset || 0;
   const path = new Array(S + 1);
   let x = ship.x, y = ship.y;
+  let crashAt = -1;
   const dh = angDelta(ship.heading, m.heading);
   for (let k = 0; k <= S; k++) {
     const t = k / S;
     const hk = ship.heading + dh * t;
     const sk = lerp(ship.speed, m.speed, t);
     path[k] = { x, y, heading: hk, speed: sk };
-    if (k < S) {
+    if (k < S && crashAt < 0) {
       x += Math.cos(hk) * sk * dt;
       y += Math.sin(hk) * sk * dt;
-      const lo = R + IN, hiX = arenaW - R - IN, hiY = arenaH - R - IN;
-      // reflect off the walls...
-      if (x < lo) x = lo + (lo - x);
-      if (x > hiX) x = hiX - (x - hiX);
-      if (y < lo) y = lo + (lo - y);
-      if (y > hiY) y = hiY - (y - hiY);
-      /* ...then settle the two constraints together. Pushing out of a prism
-         after clamping to the wall would shove a ship squeezed between them
-         straight through the wall, so alternate and finish on the wall. */
-      for (let it = 0; it < 3; it++) {
-        if (prisms && prisms.length) {
-          const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y;
-        }
+      /* Flying into the mirrored wall or into a prism is fatal. The pilot is
+         not bounced off it any more: the hull is stopped at the point of
+         contact and the ship is destroyed there. (The wall *closing onto* a
+         ship is handled in beginTurn and only shoves it — you are killed by
+         your own course, not by the arena catching up with you.) */
+      /* Contact is measured at muzzle clearance rather than at the hull, so a
+         ship is never alive with its gun buried in glass — that was the old
+         trapped-light bug, where a muzzle inside a prism shredded its owner. */
+      const CL = RULES.MUZZLE_CLEAR;
+      const lo = CL + IN, hiX = arenaW - CL - IN, hiY = arenaH - CL - IN;
+      if (x < lo || x > hiX || y < lo || y > hiY) {
         x = clamp(x, lo, Math.max(lo, hiX));
         y = clamp(y, lo, Math.max(lo, hiY));
+        crashAt = k + 1;
+      } else if (prisms) {
+        for (const P of prisms) {
+          if (prismSD(P, x, y) < CL) { crashAt = k + 1; break; }
+        }
       }
     }
   }
+  path.crashAt = crashAt;
   return path;
 }
 
@@ -374,7 +383,7 @@ function beginTurn(state, movesById) {
   /* The walls closed since last turn, so a ship parked on the old boundary can
      now be outside the new one. The wall physically shoves it back in. */
   {
-    const IN = arenaInset(state.turn), R = RULES.HULL_R;
+    const IN = arenaInset(state.turn), R = RULES.MUZZLE_CLEAR * 1.6;
     const lo = IN + R, hiX = state.arena.w - IN - R, hiY = state.arena.h - IN - R;
     for (const sh of state.ships) {
       sh.x = clamp(sh.x, lo, Math.max(lo, hiX));
@@ -404,7 +413,8 @@ function beginTurn(state, movesById) {
     if (m.fire) ship.charge -= RULES.FIRE_COST;
 
     const path = integratePath(ship, m, state.arena.w, state.arena.h, state.arena.prisms, arenaInset(state.turn));
-    plan.push({ ship, path, fire: m.fire, thrust: m.thrust, hEnd: m.heading, sEnd: m.speed });
+    plan.push({ ship, path, crashAt: path.crashAt, fire: m.fire, thrust: m.thrust,
+                hEnd: m.heading, sEnd: m.speed });
   }
   return { plan, sub: 0, substeps: RULES.SUBSTEPS, done: false, collided: new Set() };
 }
@@ -418,6 +428,7 @@ function applySubstep(state, turnCtx, sub) {
     if (!sh.alive) continue;
     const n = p.path[k];
     sh.x = n.x; sh.y = n.y; sh.heading = n.heading; sh.speed = n.speed;
+    if (p.crashAt >= 0 && k >= p.crashAt) explode(state, sh, 'crash');
   }
   for (const pr of state.arena.prisms) pr.wdir += pr.spin / S;
   stepDebris(state);
@@ -452,9 +463,11 @@ function applyCollisions(state, turnCtx) {
       const dx = s[j].x - s[i].x, dy = s[j].y - s[i].y;
       if (Math.hypot(dx, dy) >= RULES.HULL_R * 2) continue;
       turnCtx.collided.add(key);
-      /* Positions are not adjusted: they come from the precomputed path, which
-         is what keeps peers bit-identical. The pair simply cannot be hurt by
-         the same collision twice. */
+      /* A ram hurts badly but is not automatically mutual suicide: making it
+         instantly fatal ended every measured match on turn 3 with all four
+         ships dead, because pilots close on each other by design. Terrain is
+         unforgiving; each other is merely dangerous. A ram that does kill still
+         tears the ship apart like any other death. */
       for (const sh of [s[i], s[j]]) {
         let dmg = RULES.COLLIDE_DMG;
         const a = Math.min(sh.shield, dmg); sh.shield -= a; dmg -= a;

@@ -268,6 +268,8 @@ const angNorm = a => { a %= TAU; if (a > Math.PI) a -= TAU; if (a < -Math.PI) a 
 const SPEC_LO = 398, SPEC_HI = 706;
 /** van der Corput radical inverse — a fixed, flicker-free stratification jitter */
 function vdc(i) { let r = 0, f = 0.5; while (i > 0) { r += f * (i & 1); i >>= 1; f *= 0.5; } return r; }
+/** base 3, to decorrelate the lateral spread from the spectral one */
+function vdc3(i) { let r = 0, f = 1 / 3; while (i > 0) { r += f * (i % 3); i = (i / 3) | 0; f /= 3; } return r; }
 
 /* ------------------------------------------------------- spectral → linear RGB
    Wyman/Sloan/Shirley multi-lobe Gaussian fits of the CIE 1931 observer.      */
@@ -347,16 +349,16 @@ const angDelta = (a, b) => {
 
 /* --------------------------------------------------------------- constants */
 const RULES = {
-  ARENA_W: 1.60,            // world units (1 unit = viewport height at fit)
-  ARENA_H: 0.90,
+  ARENA_W: 3.20,            // world units (1 unit = viewport height at fit)
+  ARENA_H: 1.80,
   SUBSTEPS: 96,             // fixed per turn — the source of determinism
   TURN_SECONDS: 4.0,        // real seconds a resolution animation takes
   PLAN_SECONDS: 25,         // planning window before the arbiter forces the turn
 
-  SPEED_MAX: 0.215,         // world units per turn at full thrust
+  SPEED_MAX: 0.380,         // world units per turn at full thrust
                             // (the arena is 1.6 wide, so ~7 turns to cross)
-  SPEED_MIN: 0.045,         // ships are aircraft: they cannot stop
-  ACCEL: 0.075,             // max change in commanded speed per turn
+  SPEED_MIN: 0.080,         // ships are aircraft: they cannot stop
+  ACCEL: 0.132,             // max change in commanded speed per turn
   TURN_RATE: 1.15,          // radians per turn at full thrust, low speed
   TURN_RATE_SPEED_PENALTY: 0.55,  // fraction of agility lost at max speed
 
@@ -368,7 +370,10 @@ const RULES = {
   /* Damage is per millisecond of dwell, which is what makes a graze cheap and
      a sustained lock lethal. One turn is TURN_SECONDS*1000 ms of exposure at
      most, so a perfect full-turn lock is fatal and a clip costs a few points. */
-  DPS_MS: 0.052,
+  /* A perfect full-turn lock should strip a shield and bite hull, not delete a
+     ship outright — at 0.052 the first volley of a 4-way fight killed everyone
+     simultaneously on turn 3, every match. */
+  DPS_MS: 0.032,
 
   CHARGE_MAX: 1,
   CHARGE_START: 0.55,       // nobody opens with an alpha strike
@@ -377,18 +382,18 @@ const RULES = {
 
   DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
   DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
-  HULL_R: 0.0245,           // collision/hit radius — matched to the DRAWN
+  HULL_R: 0.0340,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
-  MUZZLE_CLEAR: 0.038,      // ships keep this clear of prisms, so the muzzle
+  MUZZLE_CLEAR: 0.053,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
-  COLLIDE_DMG: 26,
+  COLLIDE_DMG: 62,
 
   /* The walls close in. Without it two cautious pilots can circle forever —
      measured: a bot duel stalemated for 85 turns with both shields pinned at
      full. The mirrors closing also keeps bank shots live as space runs out. */
   RING_START: 7,            // turns of open space before the walls move
-  RING_RATE: 0.016,         // world units of inset per turn
-  RING_MAX: 0.17,
+  RING_RATE: 0.032,         // world units of inset per turn
+  RING_MAX: 0.34,
   /* Once the walls are as tight as they can go, the box itself starts to
      collapse: escalating damage to everyone, so a match always terminates.
      Without it two survivors could still circle inside the closed box —
@@ -419,32 +424,33 @@ function makeArena(seed, spawnPoints) {
     // spread them across the middle so they matter to most sight lines
     const t = (i + 0.5) / n;
     const cand = {
-      x: RULES.ARENA_W * (0.22 + 0.56 * t) + (rnd() - 0.5) * 0.10,
-      y: RULES.ARENA_H * (0.30 + 0.40 * rnd()),
-      r: 0.085 + rnd() * 0.062,
+      x: RULES.ARENA_W * (0.18 + 0.64 * t) + (rnd() - 0.5) * 0.22,
+      y: RULES.ARENA_H * (0.18 + 0.64 * rnd()),
+      r: 0.140 + rnd() * 0.105,
       wdir: rnd() * TAU,
       whalf: 0.55 + rnd() * 0.55,
       ior: 1.34 + rnd() * 0.10,
       disp: 0.045 + rnd() * 0.030,
       /* Static. A rotating prism would make the previewed bank shot a lie —
          and it could sweep over a stationary ship, putting a hull inside glass. */
+      seed: rnd(),                     // gives each disc its own film pattern
       spin: 0,
     };
     /* Nudge the prism clear of every spawn point. A ship that began inside a
        prism would fire from a muzzle buried in glass, and the trapped light
        would shred its own shield. */
     if (spawnPoints) {
-      for (let guard = 0; guard < 24; guard++) {
+      for (let guard = 0; guard < 90; guard++) {
         let worst = null, worstD = Infinity;
         for (const sp of spawnPoints) {
           const d = prismSD(cand, sp.x, sp.y);
           if (d < worstD) { worstD = d; worst = sp; }
         }
-        if (worstD > RULES.HULL_R * 3.5) break;
+        if (worstD > RULES.HULL_R * 4.5) break;
         const ax = cand.x - worst.x, ay = cand.y - worst.y;
         const al = Math.hypot(ax, ay) || 1;
-        cand.x += (ax / al) * 0.035;
-        cand.y += (ay / al) * 0.035;
+        cand.x += (ax / al) * 0.045;
+        cand.y += (ay / al) * 0.045;
         cand.x = clamp(cand.x, cand.r * 0.5, RULES.ARENA_W - cand.r * 0.5);
         cand.y = clamp(cand.y, cand.r * 0.5, RULES.ARENA_H - cand.r * 0.5);
       }
@@ -660,33 +666,38 @@ function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
   const IN = inset || 0;
   const path = new Array(S + 1);
   let x = ship.x, y = ship.y;
+  let crashAt = -1;
   const dh = angDelta(ship.heading, m.heading);
   for (let k = 0; k <= S; k++) {
     const t = k / S;
     const hk = ship.heading + dh * t;
     const sk = lerp(ship.speed, m.speed, t);
     path[k] = { x, y, heading: hk, speed: sk };
-    if (k < S) {
+    if (k < S && crashAt < 0) {
       x += Math.cos(hk) * sk * dt;
       y += Math.sin(hk) * sk * dt;
-      const lo = R + IN, hiX = arenaW - R - IN, hiY = arenaH - R - IN;
-      // reflect off the walls...
-      if (x < lo) x = lo + (lo - x);
-      if (x > hiX) x = hiX - (x - hiX);
-      if (y < lo) y = lo + (lo - y);
-      if (y > hiY) y = hiY - (y - hiY);
-      /* ...then settle the two constraints together. Pushing out of a prism
-         after clamping to the wall would shove a ship squeezed between them
-         straight through the wall, so alternate and finish on the wall. */
-      for (let it = 0; it < 3; it++) {
-        if (prisms && prisms.length) {
-          const q = pushOutOfPrisms(prisms, x, y, RULES.MUZZLE_CLEAR); x = q.x; y = q.y;
-        }
+      /* Flying into the mirrored wall or into a prism is fatal. The pilot is
+         not bounced off it any more: the hull is stopped at the point of
+         contact and the ship is destroyed there. (The wall *closing onto* a
+         ship is handled in beginTurn and only shoves it — you are killed by
+         your own course, not by the arena catching up with you.) */
+      /* Contact is measured at muzzle clearance rather than at the hull, so a
+         ship is never alive with its gun buried in glass — that was the old
+         trapped-light bug, where a muzzle inside a prism shredded its owner. */
+      const CL = RULES.MUZZLE_CLEAR;
+      const lo = CL + IN, hiX = arenaW - CL - IN, hiY = arenaH - CL - IN;
+      if (x < lo || x > hiX || y < lo || y > hiY) {
         x = clamp(x, lo, Math.max(lo, hiX));
         y = clamp(y, lo, Math.max(lo, hiY));
+        crashAt = k + 1;
+      } else if (prisms) {
+        for (const P of prisms) {
+          if (prismSD(P, x, y) < CL) { crashAt = k + 1; break; }
+        }
       }
     }
   }
+  path.crashAt = crashAt;
   return path;
 }
 
@@ -695,7 +706,7 @@ function beginTurn(state, movesById) {
   /* The walls closed since last turn, so a ship parked on the old boundary can
      now be outside the new one. The wall physically shoves it back in. */
   {
-    const IN = arenaInset(state.turn), R = RULES.HULL_R;
+    const IN = arenaInset(state.turn), R = RULES.MUZZLE_CLEAR * 1.6;
     const lo = IN + R, hiX = state.arena.w - IN - R, hiY = state.arena.h - IN - R;
     for (const sh of state.ships) {
       sh.x = clamp(sh.x, lo, Math.max(lo, hiX));
@@ -725,7 +736,8 @@ function beginTurn(state, movesById) {
     if (m.fire) ship.charge -= RULES.FIRE_COST;
 
     const path = integratePath(ship, m, state.arena.w, state.arena.h, state.arena.prisms, arenaInset(state.turn));
-    plan.push({ ship, path, fire: m.fire, thrust: m.thrust, hEnd: m.heading, sEnd: m.speed });
+    plan.push({ ship, path, crashAt: path.crashAt, fire: m.fire, thrust: m.thrust,
+                hEnd: m.heading, sEnd: m.speed });
   }
   return { plan, sub: 0, substeps: RULES.SUBSTEPS, done: false, collided: new Set() };
 }
@@ -739,6 +751,7 @@ function applySubstep(state, turnCtx, sub) {
     if (!sh.alive) continue;
     const n = p.path[k];
     sh.x = n.x; sh.y = n.y; sh.heading = n.heading; sh.speed = n.speed;
+    if (p.crashAt >= 0 && k >= p.crashAt) explode(state, sh, 'crash');
   }
   for (const pr of state.arena.prisms) pr.wdir += pr.spin / S;
   stepDebris(state);
@@ -773,9 +786,11 @@ function applyCollisions(state, turnCtx) {
       const dx = s[j].x - s[i].x, dy = s[j].y - s[i].y;
       if (Math.hypot(dx, dy) >= RULES.HULL_R * 2) continue;
       turnCtx.collided.add(key);
-      /* Positions are not adjusted: they come from the precomputed path, which
-         is what keeps peers bit-identical. The pair simply cannot be hurt by
-         the same collision twice. */
+      /* A ram hurts badly but is not automatically mutual suicide: making it
+         instantly fatal ended every measured match on turn 3 with all four
+         ships dead, because pilots close on each other by design. Terrain is
+         unforgiving; each other is merely dangerous. A ram that does kill still
+         tears the ship apart like any other death. */
       for (const sh of [s[i], s[j]]) {
         let dmg = RULES.COLLIDE_DMG;
         const a = Math.min(sh.shield, dmg); sh.shield -= a; dmg -= a;
@@ -1032,6 +1047,21 @@ let beamHits = [];
    fixed spectral sample count regardless of what the display is set to. */
 const SIM_RAYS = 16;
 const DISPLAY_RAYS = 96;
+/* A beam has width. Every ray used to leave the muzzle from the same point in
+   the same direction, so in open space the beam was a mathematically thin line:
+   a hull either intercepted all of it or none, and a graze that clipped a
+   wingtip did exactly as much damage as a shot straight down the throat.
+   Rays are now spread across the waist, so the damage a ship takes is
+   proportional to how much of the beam cross-section it actually blocks. */
+const BEAM_WAIST = 0.0075;
+/* Visual divergence only. A beam widens and dims per unit length as it travels,
+   which is what the renderer draws — but it does NOT reduce damage with range,
+   and that is correct rather than an oversight: the waist stays far narrower
+   than a hull (0.0075 against 0.034), so a ship still intercepts the whole
+   beam however far away it is. Total flux on target is unchanged; only its
+   spread on screen changes. Applying a range penalty to damage as well was
+   measured to suppress bank shots through prisms by 5x, killing the mechanic. */
+const BEAM_DIV = 0.55;
 
 /**
  * Trace every firing ship's beam through the arena.
@@ -1053,12 +1083,16 @@ function trace(collectHits) {
     const bx = sh.x + dx * MUZZLE, by = sh.y + dy * MUZZLE;
     pushHot(bx, by, 1, 1, 1, 2.0);                    // muzzle flare
 
+    const nx = -dy, ny = dx;                          // beam normal
     for (let k = 0; k < N; k++) {
       // stratified with a deterministic low-discrepancy jitter, so the
       // dispersed fan is a continuous wash rather than N discrete lines
       const u = N === 1 ? 0.5 : (k + (vdc(k + 1) - 0.5) * 0.9) / (N - 1);
       const lam = SPEC_LO + clamp(u, 0, 1) * (SPEC_HI - SPEC_LO);
-      castRay(bx, by, dx, dy, waveRGB(lam), pw, lam, si, collectHits);
+      // ...and spread across the waist on a decorrelated sequence, so each ray
+      // samples a different part of the beam's cross-section
+      const off = (vdc3(k + 1) * 2 - 1) * BEAM_WAIST;
+      castRay(bx + nx * off, by + ny * off, dx, dy, waveRGB(lam), pw, lam, si, collectHits);
     }
   }
 }
@@ -1088,7 +1122,11 @@ function castRay(ox, oy, dx, dy, col, power, lam, srcIdx, collectHits) {
 
     /* ---- a ship hull: the beam is absorbed, and that is the damage ------- */
     if (h.kind === 1) {
-      if (collectHits) beamHits.push({ srcIdx, shipIdx: h.idx, power: p });
+      /* `p` has already had every real loss taken out of it: Fresnel at each
+         interface, Beer-Lambert absorption inside glass, and the arena walls'
+         86% reflectance. So a ray that arrives weakened does proportionally
+         less damage, which is exactly the intent. */
+      if (collectHits) beamHits.push({ srcIdx, shipIdx: h.idx, depth, dist: d2, power: p });
       pushHot(hx, hy, cr, cg, cb, p * 6.0);
       continue;
     }
@@ -1237,6 +1275,7 @@ uniform int   uNShip;
 uniform vec4  uShip[4];      // x, y, heading, alive
 uniform vec4  uShipA[4];     // shield 0..1, hull 0..1, charge 0..1, firing
 uniform vec4  uShipC[4];     // livery rgb, hue
+uniform vec4  uShipB[4];     // thrust 0..1, speed 0..1, -, -
 uniform int   uSelf;         // the local player's ship index
 uniform float uHover;
 uniform vec2  uHoverEm;
@@ -1317,7 +1356,7 @@ void prismShadow(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD,
     col *= mix(vec3(1.0), vec3(0.20, 0.24, 0.36), sh);      // shadows go cool
   }
 }
-void prismSurface(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD, float PWH){
+void prismSurface(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD, float PWH, float SEED){
 
 
   /* ---------------- the dichroic disc ---------------- */
@@ -1330,28 +1369,38 @@ void prismSurface(inout vec3 col, vec2 P, float px, vec2 PC, float PR, float PWD
     float rr = min(r, 1.0);
     float an = atan(q.y, q.x);
 
+    /* Every disc samples the same field in its own normalised space, so
+       without this they come out identical twins at different sizes. A
+       per-disc domain offset plus a rotation of the anisotropic frames gives
+       each one its own pattern and its own sweep direction, while leaving the
+       frequencies and the anisotropy — the character of the film — untouched. */
+    vec2  SO = vec2(SEED*37.13, SEED*61.70);
+    float sa = SEED*6.28318531;
+    float sc = cos(sa), ss = sin(sa);
+
     /* ================= 1. the stretched-film coordinate ==================
        Two octaves of very low-frequency warp bend the interference bands
        into long organic sweeps.  Frequencies here are ~1 cycle across the
        whole disc, so nothing can alias.                                   */
-    vec2 w1 = vec2(vnoise(q*0.72 + vec2( 3.10, 7.40)),
-                   vnoise(q*0.72 + vec2(-5.20, 1.80))) - 0.5;
-    vec2 w2 = vec2(vnoise(q*1.45 + vec2(11.00, 2.30)),
-                   vnoise(q*1.45 + vec2(-1.50, 9.30))) - 0.5;
+    vec2 w1 = vec2(vnoise(q*0.72 + vec2( 3.10, 7.40) + SO),
+                   vnoise(q*0.72 + vec2(-5.20, 1.80) + SO)) - 0.5;
+    vec2 w2 = vec2(vnoise(q*1.45 + vec2(11.00, 2.30) + SO),
+                   vnoise(q*1.45 + vec2(-1.50, 9.30) + SO)) - 0.5;
     vec2 qw = q + w1*0.56 + w2*0.26;
 
     // anisotropic frames: the sweeps run long in e2 / f2 and vary across e1 / f1
-    vec2 e1 = normalize(vec2( 0.82, -0.57));
+    vec2 e1r = vec2( 0.82, -0.57), f1r = vec2( 0.35, 0.94);
+    vec2 e1 = normalize(vec2(e1r.x*sc - e1r.y*ss, e1r.x*ss + e1r.y*sc));
     vec2 e2 = vec2(-e1.y, e1.x);
-    vec2 f1 = normalize(vec2( 0.35,  0.94));
+    vec2 f1 = normalize(vec2(f1r.x*sc - f1r.y*ss, f1r.x*ss + f1r.y*sc));
     vec2 f2 = vec2(-f1.y, f1.x);
     vec2 qa = vec2(dot(qw,e1)*1.75, dot(qw,e2)*0.13);
     vec2 qb = vec2(dot(qw,f1)*1.35, dot(qw,f2)*0.17);
 
-    float s1 = fbm(qa + 2.0);                 // primary broad sweeps
-    float s2 = fbm(qb - 4.0);                 // crossing secondary sweeps
+    float s1 = fbm(qa + 2.0 + SO);            // primary broad sweeps
+    float s2 = fbm(qb - 4.0 + SO);            // crossing secondary sweeps
     // the mottle is stretched too: nothing on this sheet is round
-    float s3 = fbm(vec2(dot(q,f1)*3.4, dot(q,f2)*1.05) + 9.0);
+    float s3 = fbm(vec2(dot(q,f1)*3.4, dot(q,f2)*1.05) + 9.0 + SO);
 
     /* ================= 2. pseudo-3D surface ============================= */
     float dome  = sqrt(max(1e-4, 1.0 - rr*rr*0.62));
@@ -1842,6 +1891,7 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
   vec4 S = uShip[i];
   if (S.w < 0.5) return;                        // destroyed
   vec4  A   = uShipA[i];
+  vec4  B   = uShipB[i];
   vec3  liv = uShipC[i].rgb;
 
   /* ---- colourway trim --------------------------------------------------
@@ -1863,7 +1913,7 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
   const float R = 0.0245;                       // drawn hull radius
   mat2  M  = rot(-S.z);
   vec2  ql = M*(P - S.xy)/R;                    // local, hull radii, y down
-  if (ql.x < -3.4 || ql.x > 2.9 || abs(ql.y) > 2.4) return;   // shell + halo
+  if (ql.x < -5.6 || ql.x > 2.9 || abs(ql.y) > 2.4) return;   // shell, halo, torch
 
   float pxl  = px/R;                            // one pixel, local units
   float seed = fract(hue*17.13 + 0.371)*23.0;
@@ -1880,28 +1930,35 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
   }
 
   /* ---------------- engine plume ----------------------------------------
-     A short teardrop torch off the tail, white at the throat and livery
-     coloured down the flame.  Its length and heat are the charge read-out:
-     an idle ember at zero, a hard torch at full.                          */
-  if (ql.x < -0.90){
-    float chg  = clamp(A.z, 0.0, 1.0);
-    float t    = -0.90 - ql.x;                           // distance aft
-    float len  = 0.34 + 0.80*chg;
+     The torch reads THRUST, which is the other half of the same dial as the
+     laser: everything burning out of the tail is power not going into the
+     capacitor. A pilot running dark is reloading; a pilot trailing a hard
+     white torch will not be able to shoot for several turns. It is the one
+     piece of an opponent's plan you can read from the arena.               */
+  float thr = clamp(B.x, 0.0, 1.0);
+  if (ql.x < -0.88){
+    float t    = -0.88 - ql.x;                           // distance aft
+    float len  = 0.30 + 4.10*thr;                        // reaches well aft at full burn
     float u    = clamp(t/len, 0.0, 1.0);
     float taper= (1.0 - u)*(1.0 - u);
-    float w    = 0.150 + 0.34*u*(1.0 - 0.5*u);
+    float w    = 0.135 + 0.46*u*(1.0 - 0.45*u);
     float core = exp(-pow(abs(ql.y)/w, 2.0))*taper;
-    float flick= 0.87 + 0.13*sin(uTime*19.0 + seed*3.1 + t*6.0);
-    float amt  = core*flick*(0.16 + 0.84*chg);
-    col += liv * amt * 0.30;
-    col += vec3(0.72, 0.84, 1.06) * amt * exp(-t*7.0) * 0.20;
+    // the shock diamonds of a hard-running nozzle, only once it is lit
+    float dmd  = 0.5 + 0.5*sin(t*23.0 - uTime*3.0 + seed*2.0);
+    float flick= 0.86 + 0.14*sin(uTime*23.0 + seed*3.1 + t*7.0);
+    float amt  = core*flick*(0.04 + 2.30*thr);
+    col += liv * amt * (0.60 + 0.55*dmd*thr);
+    col += vec3(0.80, 0.90, 1.12) * amt * exp(-t*3.2) * (0.16 + 1.05*thr);
+    // a hot white throat that only appears under real burn
+    col += vec3(1.0,0.96,0.92) * exp(-pow(t/0.30, 2.0)) * exp(-pow(abs(ql.y)/0.13, 2.0))
+           * smoothstep(0.15, 0.85, thr) * 2.6;
   }
   /* twin nozzle throats glowing on the tail itself */
   {
     float chg = clamp(A.z, 0.0, 1.0);
     float nz  = exp(-pow((abs(ql.y) - 0.135)/0.080, 2.0))
               * exp(-pow((ql.x + 0.84)/0.13, 2.0));
-    col += mix(liv, vec3(1.0), 0.40) * nz * (0.09 + 0.50*chg);
+    col += mix(liv, vec3(1.0), 0.40) * nz * (0.06 + 0.30*chg + 0.95*thr);
   }
 
   /* ---------------- who is shooting at me, right now ---------------------
@@ -2199,7 +2256,7 @@ void main(){
   for (int i=0;i<4;i++){ if(i>=uNPrism) break;
     prismShadow(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x); }
   for (int i=0;i<4;i++){ if(i>=uNPrism) break;
-    prismSurface(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x); }
+    prismSurface(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x, uPrism2[i].w); }
   for (int i=0;i<4;i++){ if(i>=uNShip) break; shipDraw(col, P, px, i); }
 
   /* --- everything in the arena is lit by a burning wreck --------------------
@@ -3093,7 +3150,7 @@ function drawPuffs(prog, glo, list, pack) {
   gl.useProgram(prog.p);
   gl.uniform2f(prog.u.uRes, W, H);
   gl.uniform1f(prog.u.uH, viewScale);
-  gl.uniform2f(prog.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(prog.u.uOff, renderOffX, renderOffY);
   gl.uniform2f(prog.u.uJitter, jitterX, jitterY);
   gl.bindVertexArray(glo.vao);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, list.length);
@@ -3233,8 +3290,13 @@ const fireLUni = new Float32Array(16);
 let nFireL = 0;
 let debrisData = new Float32Array(64 * 12);
 let jitterX = 0, jitterY = 0;
+/* Firing shake. Offloading the capacitor kicks the airframe, so the view kicks
+   with it. It is applied to the render transform ONLY — viewOffX/viewOffY, and
+   therefore pointer picking and the gizmo, are untouched. */
+let shakeAmp = 0, renderOffX = 0, renderOffY = 0;
 const prismUni = new Float32Array(16), prism2Uni = new Float32Array(16);
 const shipUni = new Float32Array(16), shipAUni = new Float32Array(16), shipCUni = new Float32Array(16);
+const shipBUni = new Float32Array(16);
 
 function render(dt) {
   const aspect = W / H;
@@ -3248,7 +3310,7 @@ function render(dt) {
     const P = arena.prisms[i];
     if (P) {
       prismUni[i*4]=P.x; prismUni[i*4+1]=P.y; prismUni[i*4+2]=P.r; prismUni[i*4+3]=P.wdir;
-      prism2Uni[i*4]=P.whalf; prism2Uni[i*4+1]=P.ior; prism2Uni[i*4+2]=P.disp; prism2Uni[i*4+3]=0;
+      prism2Uni[i*4]=P.whalf; prism2Uni[i*4+1]=P.ior; prism2Uni[i*4+2]=P.disp; prism2Uni[i*4+3]=P.seed||0;
     } else { for (let k=0;k<4;k++){ prismUni[i*4+k]=0; prism2Uni[i*4+k]=0; } }
 
     const S = arena.ships[i];
@@ -3258,11 +3320,24 @@ function render(dt) {
       shipAUni[i*4+2]=S.charge/RULES.CHARGE_MAX; shipAUni[i*4+3]=S.firing?1:0;
       const L = LIVERY[S.idx % LIVERY.length];
       shipCUni[i*4]=L.rgb[0]; shipCUni[i*4+1]=L.rgb[1]; shipCUni[i*4+2]=L.rgb[2]; shipCUni[i*4+3]=L.hue;
-    } else { for (let k=0;k<4;k++){ shipUni[i*4+k]=0; shipAUni[i*4+k]=0; shipCUni[i*4+k]=0; } }
+      /* While you are giving orders your own torch previews the split you are
+         dialling in, so the slider has an immediate physical read-out. */
+      const thr = (G.phase === 'plan' && S.idx === G.selfIdx) ? G.aim.thrust
+                : (S.move ? S.move.thrust : 0.5);
+      shipBUni[i*4]=thr; shipBUni[i*4+1]=S.speed/RULES.SPEED_MAX; shipBUni[i*4+2]=0; shipBUni[i*4+3]=0;
+    } else { for (let k=0;k<4;k++){ shipUni[i*4+k]=0; shipAUni[i*4+k]=0; shipCUni[i*4+k]=0; shipBUni[i*4+k]=0; } }
   }
   const jx = halton(accN + 1, 2) - 0.5;
   const jy = halton(accN + 1, 3) - 0.5;
   jitterX = jx; jitterY = jy;
+
+  /* Two frequencies plus a slow sway, so it reads as a airframe shuddering
+     under load rather than as a uniform buzz. */
+  if (shakeAmp > 0.0005) {
+    const a = shakeAmp * viewScale * 0.055;
+    renderOffX = viewOffX + a * (Math.sin(time * 137.0) * 0.7 + Math.sin(time * 61.3) * 0.5);
+    renderOffY = viewOffY + a * (Math.cos(time * 119.0) * 0.7 + Math.cos(time * 47.9) * 0.5);
+  } else { renderOffX = viewOffX; renderOffY = viewOffY; }
 
   /* The fireballs still burning, as lights. Computed once and used by both the
      environment pass (deck, prisms, living ships) and the wreckage pass. */
@@ -3281,7 +3356,7 @@ function render(dt) {
     gl.uniform2f(u.uJitter, jx, jy);
     gl.uniform2f(u.uRes, W, H);
     gl.uniform1f(u.uH, viewScale);
-    gl.uniform2f(u.uOff, viewOffX, viewOffY);
+    gl.uniform2f(u.uOff, renderOffX, renderOffY);
     gl.uniform1f(u.uTime, time);
     gl.uniform2f(u.uArena, arena.w, arena.h);
     gl.uniform1f(u.uInset, (G.state && G.state.inset) || 0);
@@ -3292,6 +3367,7 @@ function render(dt) {
     gl.uniform4fv(u.uShip, shipUni);
     gl.uniform4fv(u.uShipA, shipAUni);
     gl.uniform4fv(u.uShipC, shipCUni);
+    gl.uniform4fv(u.uShipB, shipBUni);
     gl.uniform1i(u.uSelf, G.selfIdx);
     gl.uniform1f(u.uHover, hoverDisc);
     gl.uniform2f(u.uHoverEm, hoverEm, 1);
@@ -3341,7 +3417,7 @@ function render(dt) {
     gl.useProgram(pDebris.p);
     gl.uniform2f(pDebris.u.uRes, W, H);
     gl.uniform1f(pDebris.u.uH, viewScale);
-    gl.uniform2f(pDebris.u.uOff, viewOffX, viewOffY);
+    gl.uniform2f(pDebris.u.uOff, renderOffX, renderOffY);
     gl.uniform2f(pDebris.u.uJitter, jx, jy);
     gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
     gl.uniform4fv(pDebris.u.uFireL, fireLUni);
@@ -3376,11 +3452,11 @@ function render(dt) {
   gl.useProgram(pBeam.p);
   gl.uniform2f(pBeam.u.uRes, W, H);
   gl.uniform1f(pBeam.u.uH, viewScale);
-  gl.uniform2f(pBeam.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(pBeam.u.uOff, renderOffX, renderOffY);
   gl.uniform2f(pBeam.u.uJitter, jx, jy);
   gl.uniform1f(pBeam.u.uWidth, wBase * 6.0);
   gl.uniform1f(pBeam.u.uRefPower, traceRefPower);
-  gl.uniform1f(pBeam.u.uDiv, 1.9);
+  gl.uniform1f(pBeam.u.uDiv, BEAM_DIV);
   gl.uniform1f(pBeam.u.uCore, wBase * 0.62);
   gl.uniform1f(pBeam.u.uHalo, wBase * 3.0);
   gl.bindVertexArray(vaoBeam);
@@ -3389,7 +3465,7 @@ function render(dt) {
   gl.useProgram(pHot.p);
   gl.uniform2f(pHot.u.uRes, W, H);
   gl.uniform1f(pHot.u.uH, viewScale);
-  gl.uniform2f(pHot.u.uOff, viewOffX, viewOffY);
+  gl.uniform2f(pHot.u.uOff, renderOffX, renderOffY);
   gl.uniform2f(pHot.u.uJitter, jx, jy);
   gl.uniform1f(pHot.u.uSize, 0.0090 * beamW);
   gl.bindVertexArray(vaoHot);
@@ -4402,6 +4478,9 @@ function mk(tag, attrs) {
   svg.appendChild(e);
   return e;
 }
+/* The reachable envelope: how far you can turn and how fast you can be going
+   by the end of this turn. It is the only visualisation of what the power
+   split actually buys you, which is why it stays. */
 const gEnvelope = mk('path', { fill: 'rgba(127,216,255,.055)', stroke: 'rgba(127,216,255,.20)', 'stroke-width': 1 });
 const gTrackBk = mk('path', { fill: 'none', stroke: 'rgba(0,0,0,.55)', 'stroke-width': 4.5, 'stroke-linecap': 'round' });
 const gTrack = mk('path', { fill: 'none', stroke: '#7fd8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
@@ -4950,7 +5029,7 @@ function botOrders(sh) {
 
   // stay off the closing walls — being pinned against one is how bots die
   const IN = (G.state && G.state.inset) || 0;
-  const m = 0.10;
+  const m = RULES.SPEED_MAX * 1.35;      // one turn of travel, plus a little
   const cx = arena.w * 0.5, cy = arena.h * 0.5;
   const nearWall = Math.min(sh.x - IN, arena.w - IN - sh.x, sh.y - IN, arena.h - IN - sh.y);
   if (nearWall < m) {
@@ -4971,13 +5050,77 @@ function botOrders(sh) {
   else if (dist > 0.6) thrust = 0.85;
   else thrust = off > 0.5 ? 0.45 : 0.3;
 
-  const speed = nearWall < m ? RULES.SPEED_MAX
-              : dist > 0.5 ? RULES.SPEED_MAX * 0.85
-              : RULES.SPEED_MAX * 0.5;
+  let speed = nearWall < m ? RULES.SPEED_MAX
+            : dist > 0.5 ? RULES.SPEED_MAX * 0.85
+            : RULES.SPEED_MAX * 0.5;
+
+  /* Throttle back near anything solid. Every bot death was a "boxed in" case:
+     cornered with too much speed left to turn out of it, because turn rate
+     falls as speed rises. Room to manoeuvre is bought with the throttle. */
+  let clearance = nearWall;
+  for (const pr of arena.prisms) clearance = Math.min(clearance, prismSD(pr, sh.x, sh.y));
+  const comfort = RULES.SPEED_MAX * 1.6;
+  if (clearance < comfort) {
+    speed = Math.min(speed, RULES.SPEED_MIN +
+      (RULES.SPEED_MAX - RULES.SPEED_MIN) * clamp(clearance / comfort, 0, 1) ** 1.5);
+  }
 
   // only shoot when the nose will actually be on them
   const fire = charged && off < 0.38 && dist < 1.05;
-  return { heading: want, speed, thrust, fire };
+
+  /* Flying into a wall or a prism is fatal now, so a bot that only chases is a
+     bot that kills itself — measured, 30 of 32 deaths were crashes. Candidate
+     courses are tested through the very same integrator the simulation uses,
+     so the avoidance is exactly as accurate as the rules are. */
+  return avoidObstacles(sh, { heading: want, speed, thrust, fire });
+}
+
+function avoidObstacles(sh, move) {
+  const inset = (G.state && G.state.inset) || 0;
+  const path = m => {
+    const legal = legaliseMove(sh, m);
+    return integratePath(sh, legal, arena.w, arena.h, arena.prisms, inset);
+  };
+  /* One turn of lookahead is not enough: a course can be perfectly clear and
+     still end with the nose against a prism and no turn rate left to escape.
+     Every bot death was one of these. So a candidate only counts as safe if,
+     from where it leaves you, some continuation also survives. */
+  const survivesNextTurn = p => {
+    const end = p[RULES.SUBSTEPS];
+    const ghost = { x: end.x, y: end.y, heading: end.heading, speed: end.speed, charge: 0 };
+    for (let step = 0; step <= 5; step++) {
+      for (const sgn of (step === 0 ? [1] : [1, -1])) {
+        for (const slow of [0.45, 1]) {
+          const m2 = { heading: end.heading + sgn * step * 0.34,
+                       speed: end.speed * slow, thrust: 0.5, fire: false };
+          const l2 = legaliseMove(ghost, m2);
+          if (integratePath(ghost, l2, arena.w, arena.h, arena.prisms,
+                            arenaInset((G.state ? G.state.turn : 0) + 1)).crashAt < 0) return true;
+        }
+      }
+    }
+    return false;
+  };
+
+  const p0 = path(move);
+  if (p0.crashAt < 0 && survivesNextTurn(p0)) return move;
+
+  let firstClear = null, bestAlt = null, bestCrash = -1;
+  for (let step = 1; step <= 9; step++) {
+    for (const sgn of [1, -1]) {
+      for (const slow of [1, 0.55, 0.22]) {     // slowing tightens the turn
+        const cand = { ...move, heading: move.heading + sgn * step * 0.28,
+                       speed: move.speed * slow, fire: false };
+        const pc = path(cand);
+        if (pc.crashAt < 0) {
+          if (!firstClear) firstClear = cand;            // survives this turn
+          if (survivesNextTurn(pc)) return cand;         // ...and the next
+        } else if (pc.crashAt > bestCrash) { bestCrash = pc.crashAt; bestAlt = cand; }
+      }
+    }
+  }
+  // nothing survives two turns: take one clear turn, else buy the most time
+  return firstClear || bestAlt || move;
 }
 
 function maybeResolve() {
@@ -5488,9 +5631,25 @@ $('bStart').addEventListener('click', () => {
 /* ------------------------------------------------------------- per-frame */
 function gameFrame(dt) {
   tickClock();
-  if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
-  stepVfx(dt);
-  if (vfxLoad()) dirty = true;                               // keep the frame live
+  /* Nothing in the world moves while orders are being given, so the fire and
+     smoke hold their pose too — a drifting plume over a frozen battlefield read
+     as a bug. It also lets the accumulator converge, so the planning phase is a
+     crisp supersampled still rather than a frame that re-renders forever. */
+  if (G.phase === 'resolve' && G.ctx) {
+    stepResolve(dt);
+    stepVfx(dt);
+    if (vfxLoad()) dirty = true;
+  }
+
+  /* The view shakes while YOUR ship is discharging: it is your airframe, not
+     the camera, so an opponent firing across the map does not rattle you.
+     It builds over the first moments of the burn and decays after. */
+  const me = selfShip();
+  const firing = G.phase === 'resolve' && me && me.alive && me.firing;
+  const target = firing ? 1 : 0;
+  const rate = firing ? 9.0 : 3.2;
+  shakeAmp += (target - shakeAmp) * Math.min(1, dt * rate);
+  if (shakeAmp > 0.0005) dirty = true;
   stepFx(dt);
   drawGizmo();
 }
@@ -5579,7 +5738,7 @@ async function savePNG(scale = 2) {
   setTimeout(() => URL.revokeObjectURL(a.href), 8000);
 }
 
-window.__prisma = { G, arena, RULES, render, gameFrame, exportStill, savePNG, resetAccum, trace,
+window.__prisma = { getHits: () => beamHits, G, arena, RULES, render, gameFrame, exportStill, savePNG, resetAccum, trace,
                     startResolve, commitOrders, beginPlan, newGame, stateHash, LIVERY,
                     integratePath, legaliseMove, beginTurn, applySubstep, applyHits, applyCollisions, endTurn };
 </script>

@@ -32,13 +32,18 @@ function playout(seed, turns, moveGen, hitGen) {
   return { st, hashes };
 }
 
-// a scripted "player" — deterministic, no randomness
-const script = (t, s) => ({
-  heading: s.heading + Math.sin(t * 0.7 + s.idx) * 0.6,
-  speed: 0.04 + 0.03 * Math.sin(t * 0.4 + s.idx * 1.3),
-  thrust: 0.3 + 0.4 * ((t + s.idx) % 3) / 2,
-  fire: (t + s.idx) % 4 === 0,
-});
+/* A scripted "player" — deterministic, no randomness. It steers back toward
+   the middle of the arena, because flying into a wall or a prism is now fatal
+   and a script that kills everyone by turn 3 has nothing left to diverge. */
+const script = (t, s) => {
+  const toMid = Math.atan2(C.RULES.ARENA_H * 0.5 - s.y, C.RULES.ARENA_W * 0.5 - s.x);
+  return {
+    heading: toMid + Math.sin(t * 0.7 + s.idx) * 0.45,
+    speed: C.RULES.SPEED_MAX * (0.35 + 0.15 * Math.sin(t * 0.4 + s.idx * 1.3)),
+    thrust: 0.3 + 0.4 * ((t + s.idx) % 3) / 2,
+    fire: (t + s.idx) % 4 === 0,
+  };
+};
 // a scripted laser: ship i always dwells on ship (i+1)
 const hits = (st, sub) => st.ships.filter(s => s.alive && s.firedThisTurn)
   .map(s => ({ srcIdx: s.idx, shipIdx: (s.idx + 1) % st.ships.length, power: 0.11 }));
@@ -98,11 +103,15 @@ console.log('\ndamage model');
   const oneStep = before - st.ships[1].shield;
   ok('a single substep of full-power dwell does modest damage', oneStep > 0 && oneStep < 5, `${oneStep.toFixed(2)}`);
 
-  // a full turn of uninterrupted full-power dwell should be lethal-ish
+  /* A perfect full-turn lock should strip the shield and bite hull — enough to
+     be decisive over two turns, not enough to delete a ship outright. At the
+     old rate the opening volley of a four-way fight killed everyone at once. */
   const st2 = C.makeState(PLAYERS, 3);
   for (let i = 0; i < ctx.substeps; i++) C.applyHits(st2, [{ srcIdx: 0, shipIdx: 1, power: 1 }], msPer);
   const total = (C.RULES.SHIELD_MAX - st2.ships[1].shield) + (C.RULES.HULL_MAX - st2.ships[1].hull);
-  ok('a full-turn lock is decisive', total > 150, `${total.toFixed(0)} damage`);
+  const cap = C.RULES.SHIELD_MAX + C.RULES.HULL_MAX;
+  ok('a full-turn lock strips the shield', total > C.RULES.SHIELD_MAX, `${total.toFixed(0)} damage`);
+  ok('but does not delete a ship outright', total < cap * 0.85, `${total.toFixed(0)} of ${cap}`);
   ok('shield absorbs before hull', st2.ships[1].shield === 0 && st2.ships[1].hull < C.RULES.HULL_MAX);
 
   const st3 = C.makeState(PLAYERS, 3);
@@ -134,7 +143,10 @@ console.log('\narena containment');
   const st = C.makeState(PLAYERS, 7);
   for (let t = 0; t < 40; t++) {
     const moves = {};
-    for (const s of st.ships) moves[s.id] = { heading: 0.3, speed: C.RULES.SPEED_MAX, thrust: 1, fire: false };
+    for (const s of st.ships) {
+      const toMid = Math.atan2(C.RULES.ARENA_H * 0.5 - s.y, C.RULES.ARENA_W * 0.5 - s.x);
+      moves[s.id] = { heading: toMid, speed: C.RULES.SPEED_MAX * 0.5, thrust: 1, fire: false };
+    }
     const ctx = C.beginTurn(st, moves);
     for (let sub = 1; sub <= ctx.substeps; sub++) C.applySubstep(st, ctx, sub);
     C.endTurn(st);
@@ -157,14 +169,19 @@ console.log('\ninvariants under the closing arena');
     const st = C.makeState(PLAYERS, seed * 131);
     for (let t = 0; t < 30; t++) {
       const moves = {};
-      for (const s of st.ships)
-        moves[s.id] = { heading: s.heading + 0.9 * Math.sin(t * 2.3 + s.idx),
-                        speed: C.RULES.SPEED_MAX, thrust: 1, fire: false };
+      for (const s of st.ships) {
+        // steer toward the middle: flying into the wall is now fatal, and a
+        // dead ship stops exercising the invariant
+        const toMid = Math.atan2(C.RULES.ARENA_H * 0.5 - s.y, C.RULES.ARENA_W * 0.5 - s.x);
+        moves[s.id] = { heading: toMid + 0.5 * Math.sin(t * 2.3 + s.idx),
+                        speed: C.RULES.SPEED_MAX * 0.5, thrust: 1, fire: false };
+      }
       const ctx = C.beginTurn(st, moves);
       for (let k = 1; k <= ctx.substeps; k++) {
         C.applySubstep(st, ctx, k);
         const IN = C.arenaInset(st.turn), R = C.RULES.HULL_R;
         for (const s of st.ships) {
+          if (!s.alive) continue;      // a wreck may lie wherever it fell
           samples++;
           const out = Math.max(IN + R - s.x, s.x - (st.arena.w - IN - R),
                                IN + R - s.y, s.y - (st.arena.h - IN - R));
@@ -181,6 +198,40 @@ console.log('\ninvariants under the closing arena');
   ok('no muzzle is ever inside a prism', muzzleIn === 0, `${muzzleIn} occurrences`);
   ok('the closed arena stays larger than a prism',
      (C.RULES.ARENA_H - 2 * C.RULES.RING_MAX) > 0.30);
+}
+
+console.log('\ncollisions are fatal');
+{
+  // fly straight at the left wall from the middle of the field
+  const st = C.makeState(PLAYERS, 5150);
+  const s0 = st.ships[0];
+  // close enough that one turn at full speed reaches the wall, and already
+  // at speed so acceleration clamping does not shorten the run
+  s0.x = 0.30; s0.y = C.RULES.ARENA_H * 0.5; s0.heading = Math.PI; s0.speed = C.RULES.SPEED_MAX;
+  const ctx = C.beginTurn(st, { [s0.id]: { heading: Math.PI, speed: C.RULES.SPEED_MAX, thrust: 1, fire: false } });
+  ok('a course into the wall is flagged before the turn runs', ctx.plan[0].crashAt > 0);
+  for (let k = 1; k <= ctx.substeps; k++) C.applySubstep(st, ctx, k);
+  ok('and the ship is destroyed by it', !s0.alive);
+  ok('leaving wreckage', st.debris.length > 0);
+  ok('the wreck stops at the wall, not through it',
+     s0.x >= C.RULES.MUZZLE_CLEAR - 1e-9);
+
+  // and into a prism
+  const st2 = C.makeState(PLAYERS, 5150);
+  const s1 = st2.ships[0], pr = st2.arena.prisms[0];
+  s1.x = pr.x - 0.30; s1.y = pr.y; s1.heading = 0; s1.speed = C.RULES.SPEED_MAX;
+  const ctx2 = C.beginTurn(st2, { [s1.id]: { heading: 0, speed: C.RULES.SPEED_MAX, thrust: 1, fire: false } });
+  for (let k = 1; k <= ctx2.substeps; k++) C.applySubstep(st2, ctx2, k);
+  ok('flying into a prism destroys the ship', !s1.alive);
+
+  // a ship that stays clear is untouched
+  const st3 = C.makeState(PLAYERS, 5150);
+  const s2 = st3.ships[0];
+  s2.x = C.RULES.ARENA_W * 0.5; s2.y = C.RULES.ARENA_H * 0.5; s2.speed = C.RULES.SPEED_MIN;
+  const clear = st3.arena.prisms.every(p => C.prismSD(p, s2.x, s2.y) > 0.4);
+  const ctx3 = C.beginTurn(st3, { [s2.id]: { heading: s2.heading, speed: C.RULES.SPEED_MIN, thrust: 0, fire: false } });
+  for (let k = 1; k <= ctx3.substeps; k++) C.applySubstep(st3, ctx3, k);
+  ok('a ship in open space is not harmed', !clear || s2.alive);
 }
 
 console.log('\ntimeout behaviour');
