@@ -1627,6 +1627,215 @@ float sh_hgt(vec2 q){
   return h * smoothstep(-0.026, 0.100, -sh_sil(q));
 }
 
+/* ============================== the shield ================================
+   The old shell was a fixed-radius gaussian band on the floor with the hull
+   painted over the top of it: a hoop, not a bubble.  This one is an oblate
+   ellipsoid of field around the airframe, evaluated as a real surface.
+
+   Everything happens in "e-space", where that ellipsoid is the unit sphere:
+   u = |e| runs 0 at the crown (straight above the ship) to 1 at the limb, and
+   zz = sqrt(1-u*u) is the height of the near skin.  Fresnel, the specular
+   dome highlight, the gore quilt and the impact ripples are all functions of
+   that 3D point, which is what stops the thing reading as a 2D circle.  The
+   caller crosses the surface twice outside the silhouette (near skin + far
+   skin) and once over the hull, so the near skin genuinely passes in front of
+   the craft instead of hiding behind it.
+
+   Three independent cues carry the charge, so none of them has to be read as
+   a brightness:
+
+     SIZE   the field stands off further when it is strong and collapses onto
+            the hull as it drains -- and the hull is right there as a ruler;
+     COUNT  the skin is quilted into 15 meridian gores that blink out one at a
+            time in a fixed order, so the survivors are countable at a glance
+            and the pattern is stable enough to compare between ships;
+     HEAT   a healthy shell is cool, even and quiet; a failing one runs orange
+            and strobes, and its few live gores burn brighter than a full
+            shell ever does -- so the read never dies of fading.            */
+
+#define SH_GORES 15.0
+#define SH_INV2PI 0.15915494
+
+/* Failure order of the gores.  A stride-7 walk over 15 slots is a perfect
+   stratification -- exactly one gore dies per 1/15 of charge -- while
+   scattering the survivors around the hull instead of eating the skin from
+   one side.  It is a pure function of the gore index, so a gore that is out
+   stays out and the reading does not crawl.                                */
+float sh_goreQ(float g, float seed){
+  return (mod(g*7.0 + floor(seed*11.0), SH_GORES) + 0.5)/SH_GORES;
+}
+
+/* One crossing of the shell.  imp is the impact direction on the shell in
+   local coordinates (unit, in the arena plane), amt is how hard the beam is
+   standing on it, and w is how many skins this crossing is worth: 2 outside
+   the silhouette (near + far), 1 over the hull.  w>1.5 also runs the floor
+   interaction, which must happen exactly once.                             */
+void sh_shell(inout vec3 col, vec2 ql, float pxl, float sv, vec3 liv,
+              float hue, float seed, vec2 kl, vec2 imp, float amt,
+              float self, float w){
+  /* --- stand-off -------------------------------------------------------- */
+  float rr = mix(1.08, 1.58, pow(sv, 0.80));
+  vec2  ab = vec2(1.56, 1.00)*rr;               // half-extents, hull radii
+  float cz = 0.64*rr;                           // and the vertical one
+
+  /* the beam dents the surface in where it dwells: the stand-off is a
+     pressure balance, and this is the side that is losing.                 */
+  vec2  d2   = ql/max(length(ql), 1e-4);
+  float dent = amt*0.26*exp(-(1.0 - dot(d2, imp))*3.6);
+
+  vec2  e  = ql/(ab*(1.0 - dent));
+  float u  = length(e);
+  float ow = max(0.055, pxl*2.4/ab.x);          // soft outer edge, never a step
+  float fade = exp(-max(u - 1.0, 0.0)/ow);
+  if (fade < 0.004) return;
+
+  float uc = min(u, 1.0);
+  float zz = sqrt(max(0.0, 1.0 - uc*uc));
+  vec3  s3 = vec3(e/max(u, 1.0), zz);           // the surface point, e-space
+  vec3  n3 = normalize(vec3(s3.xy/ab, s3.z/cz));// unscaled -> the true normal
+  float nv = clamp(n3.z, 0.0, 1.0);
+  /* Limb-brightening rather than a drawn band, and the exponent is high on
+     purpose: at 2.4 the shoulder is still a couple of percent of the wall
+     brightness a third of the way in, which fills every live gore with a flat
+     pale wedge and turns the bubble into a paper pinwheel.  Up here the skin
+     is a clean three-to-five pixel edge that follows the ellipse's own
+     curvature -- wider where the surface is flatter, as a real one is -- and
+     the interior is genuinely empty.  The exponent also carries a little of
+     the charge: a full shield wears a broad soft skin, a dying one a hard
+     thin filament.                                                         */
+  float fres = pow(1.0 - nv, mix(4.6, 2.9, sv));
+
+  /* --- the quilt --------------------------------------------------------- */
+  float th = atan(s3.y, s3.x);
+  float gt = (th*SH_INV2PI + 0.5)*SH_GORES;
+  float g  = floor(gt), gf = gt - g;
+  float mg = clamp((sv - sh_goreQ(g, seed) + 0.030)*SH_GORES*1.60, 0.0, 1.0);
+  float fl = 0.5 + 0.5*sin(uTime*(6.0 + 26.0*(1.0 - sv)) + g*2.39 + seed*5.0);
+  float live = mg*(1.0 - 0.78*(1.0 - mg)*fl);   // a gore on its threshold gutters
+
+  /* seam half-width is held at or above a pixel, so the ribs soften instead
+     of aliasing when the ship is small or far into the corner of the arena */
+  float gpx  = SH_GORES*SH_INV2PI*pxl/max(length(ql), 0.30);
+  float sw   = max(0.075, gpx*1.35);
+  /* ...and once a rib is wider than about a third of its own gore it is no
+     longer a rib, it is a wedge of paint filling the gore.  Fade it out
+     there rather than let it smear: that smear was what kept turning the
+     inside of the bubble into a pinwheel.                                  */
+  float seam = exp(-pow(min(gf, 1.0 - gf)/sw, 2.0))*smoothstep(0.16, 0.09, sw);
+
+  /* --- what the skin is made of ------------------------------------------
+     Each gore carries its own interference stop, so the rim glitters in the
+     ship's colourway instead of washing to one flat tint.  The swing is
+     deliberately held to well under one fringe order: let it run a whole
+     order and the hue wanders right round the wheel, and an amber ship ends
+     up wearing a green and magenta shield -- which is exactly the identity
+     the four liveries exist to protect.                                    */
+  float thick = 462.0 + 78.0*sin(g*1.71 + seed*3.3) + 128.0*(1.0 - nv)
+              + 34.0*sin(uTime*0.6 + g*0.9);
+  vec3  film  = sh_film(thick, mix(1.0, nv, 0.55), 1.29, hue, 0.60);
+  float mott  = sh_mottle(s3.xy*2.6 + vec2(uTime*0.05, seed), pxl);
+
+  float hot  = 1.0 - sv;
+  vec3  cool = mix(vec3(0.58, 0.80, 1.12), liv, 0.55);
+  vec3  warm = vec3(1.30, 0.42, 0.10);
+  vec3  tone = mix(cool, warm, hot*hot*0.80);
+  float gain = mix(1.0, 3.4, hot)*(1.0 + 0.35*self);  // fewer gores, hotter ones
+
+  /* The skin is a rim phenomenon and nothing else.  A real film is only
+     visible where the surface turns away from the eye, so the body rides
+     entirely on fres; give it any constant at all and the gores stop being a
+     curved surface and become flat paper wedges lying on the floor.
+
+     Past the limb there is no surface left to quilt -- what is out there is
+     the light the film scatters sideways -- so the gore structure is allowed
+     to dissolve into a smooth glow as u leaves 1.  Without that the halo
+     inherits the gore edges and the whole thing turns into a paper pinwheel. */
+  float diss  = smoothstep(1.0, 1.15, u);
+  float liveH = mix(live, sv*0.80, diss);
+  vec3  L3   = normalize(vec3(kl*0.86, 0.60));
+  float keyf = 0.40 + 0.60*max(dot(n3, L3), 0.0);   // the lit half of the dome
+  float toPole = smoothstep(0.42, 0.95, u)*(1.0 - diss);
+  vec3 c = vec3(0.0);
+  c += film*tone*liveH*(0.155*fres)*(0.70 + 0.60*mott)*keyf*gain;
+
+  /* ...and under the filament, a soft wide shoulder that is deliberately NOT
+     quilted.  A single hard line reads as an outline drawn round the ship; it
+     takes a few pixels of graded skin inside it before the eye accepts a
+     surface.  Driving it off sv rather than off the gores is what lets it be
+     wide without the gore edges printing through as wedges.               */
+  c += film*tone*(0.046*sv)*pow(1.0 - nv, 1.8)*(0.60 + 0.50*mott)*keyf;
+  c += mix(vec3(0.86, 0.94, 1.16), tone, 0.55)*seam*live*toPole
+       *(0.0060 + 0.068*fres)*gain;
+
+  /* A shallow bowl of light inside the skin.  Smooth and unquilted -- its
+     only job is to give the enclosed volume a floor-to-rim gradient, so the
+     eye reads a dome standing over the craft rather than a hoop drawn round
+     it.  pow(u,5) keeps it clear of the middle, where the hull lives.     */
+  c += tone*(0.011*sv)*pow(u, 5.0)*(0.75 + 0.50*mott);
+
+  /* ...and the volume itself.  A shell over a near-black floor still scatters
+     a little light back through its own interior, and without that the disc
+     inside the rim comes out darker than the wall around it -- which the eye
+     reads as a hole in the deck, not as a dome standing on it.  Brightest at
+     the crown, falling to the limb, unquilted and very soft.              */
+  c += mix(tone, liv, 0.45)*(0.0055*sv)*(0.28 + 0.72*zz)*(0.80 + 0.40*mott);
+
+  /* The dome specular: one soft off-centre highlight lying over the craft
+     rather than around it.  More than anything else this is what says the
+     surface is curved glass in front of the ship and not a decal behind it.
+     A half-vector lobe is useless here -- looking down the axis of an oblate
+     dome, n.h stays near 1 across the whole crown and the "highlight" fills
+     the disc as flat grey -- so it is placed directly on the near skin, at a
+     fixed offset towards the key.  Near-skin only: the far skin's highlight
+     points away from us.                                                    */
+  vec2  hp  = s3.xy - kl*0.50;
+  float sh1 = exp(-dot(hp, hp)*5.5);                 // the broad sheen
+  float sh2 = exp(-dot(hp, hp)*46.0);                // and the glint in it
+  vec3  cn  = vec3(0.60, 0.76, 1.14)*(sh1 + 1.9*sh2)*zz
+              *(0.022 + 0.052*sv)*smoothstep(0.02, 0.20, sv);
+  /* enclosed volume: a whisper of livery inside the skin, so the space the
+     bubble occupies is not simply empty                                     */
+  cn += liv*(1.0 - smoothstep(0.35, 1.00, u))*0.0026*sv;
+
+  /* --- being hit ----------------------------------------------------------
+     Damage is power times milliseconds of dwell, so the load has to look
+     *sustained*, not like a spark: a standing white-hot cap where the beam
+     stands on the skin, rings running out of it across the surface, and the
+     ribs around it carrying the current away.  The strobe is shallow on
+     purpose -- a deep flicker would read as an intermittent hit.          */
+  if (amt > 0.002){
+    float gd  = acos(clamp(dot(s3, vec3(imp, 0.0)), -1.0, 1.0));
+    float cap = exp(-gd*gd*4.6);
+    float rip = max(sin(gd*11.0 - uTime*7.0), 0.0);
+    rip *= rip;
+    float env = exp(-gd*gd*1.3)*mix(0.50, 1.0, zz);
+    float sp  = 0.80 + 0.20*sin(uTime*27.0 + g*5.1);
+    float core = exp(-gd*gd*26.0);
+    c += vec3(1.30, 1.06, 0.82)*cap*amt*(0.055 + 0.42*fres)*sp;
+    c += vec3(1.15, 1.10, 1.02)*core*amt*(0.10 + 0.75*fres)*sp;
+    c += mix(vec3(1.00, 0.92, 0.82), tone, 0.40)*rip*env*amt*(0.030 + 0.16*fres);
+    c += vec3(1.25, 0.62, 0.20)*seam*env*amt*(0.020 + 0.14*fres);
+    /* the field crowds towards the load: gores that had failed light again
+       around the point of impact, which is why a hit does not simply vanish
+       into a hole once the shell is half gone                             */
+    c += film*tone*cap*amt*(0.10*fres)*gain*(1.0 - live);
+  }
+
+  /* --- what the field does to the floor behind it -------------------------
+     Run once, on the outside pass.  A narrow dark ring hugging the limb is
+     the single cheapest way to say "closed surface standing off the deck":
+     it gives the bubble an edge the eye can trust, and it keeps four of
+     these from dissolving into one another when they overlap.             */
+  if (w > 1.5){
+    float lim = exp(-pow((u - 1.03)/max(0.055, pxl*1.8/ab.x), 2.0));
+    col *= 1.0 - 0.15*lim*mix(0.30, 1.0, live);
+  }
+  /* wn counts the near skin only, so terms that belong to one side of the
+     bubble do not double up outside the silhouette and then halve over it */
+  float wn = (w > 1.5) ? 1.0 : w;
+  col += (c*w + cn*wn)*fade;
+}
+
 void shipDraw(inout vec3 col, vec2 P, float px, int i){
   vec4 S = uShip[i];
   if (S.w < 0.5) return;                        // destroyed
@@ -1652,7 +1861,7 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
   const float R = 0.0245;                       // drawn hull radius
   mat2  M  = rot(-S.z);
   vec2  ql = M*(P - S.xy)/R;                    // local, hull radii, y down
-  if (ql.x < -3.1 || ql.x > 2.4 || abs(ql.y) > 2.1) return;
+  if (ql.x < -3.4 || ql.x > 2.9 || abs(ql.y) > 2.4) return;   // shell + halo
 
   float pxl  = px/R;                            // one pixel, local units
   float seed = fract(hue*17.13 + 0.371)*23.0;
@@ -1693,28 +1902,60 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
     col += mix(liv, vec3(1.0), 0.40) * nz * (0.09 + 0.50*chg);
   }
 
-  /* ---------------- shield bubble ---------------------------------------
-     A soap-thin refractive shell -- the same interference physics as the
-     hull coating, an order of magnitude thicker, so it shimmers in the
-     ship's own colourway.  Full: an unbroken skin with a bright grazing
-     rim.  Failing: it thins, breaks into drifting plates, then goes.      */
-  {
-    float sv = clamp(A.x, 0.0, 1.0);
-    if (sv > 0.004){
-      float sr  = length(ql*vec2(0.82, 1.14));           // ovoid, along the hull
-      vec2  dir = ql/max(length(ql), 1e-4);
-      float shell = exp(-pow((sr - 1.34)/0.115, 2.0));
-      float brk  = sh_mottle(dir*2.1 + vec2(uTime*0.06, seed), pxl);
-      float gate = smoothstep(1.00 - 1.18*sv, 0.64 - 0.40*sv, 1.0 - brk);
-      float face = 0.28 + 0.72*max(dot(dir, kl), 0.0);
-      float sth  = 430.0 + 300.0*brk + 260.0*(1.0 - face);
-      vec3  stn  = sh_film(sth, 0.72, 1.33, hue, 0.62);
-      float e = shell*gate*sv;
-      col += stn * liv * e * (0.050 + 0.28*face*face);
-      col += vec3(0.60, 0.76, 1.05) * e * pow(face, 3.0) * 0.070;
-      col += liv * smoothstep(1.34, 0.05, sr) * gate * sv * 0.0050;
+  /* ---------------- who is shooting at me, right now ---------------------
+     Dwell is the whole mechanic, so the shell has to show the beam standing
+     on it -- but nothing tells the shader that this ship is being hit.  It
+     is recovered from geometry instead: a firing ship's beam leaves its own
+     muzzle along its own nose, and the first hull it meets is the one taking
+     the damage.  Anything nearer on that line -- another fighter, a prism --
+     eats it first.  A beam folded onto a target by a mirror or a prism is
+     invisible to a straight-line test, but that is the safe direction of
+     error: it can only ever miss a flare, never invent one.               */
+  vec2  imp = vec2(1.0, 0.0);
+  float impAmt = 0.0;
+  for (int j = 0; j < 4; j++){
+    if (j == i || j >= uNShip) continue;
+    vec4 Sj = uShip[j];
+    if (Sj.w < 0.5 || uShipA[j].w < 0.5) continue;
+    mat2  Mj  = rot(Sj.z);
+    vec2  o   = Sj.xy + Mj*vec2(1.30*R, 0.0);         // muzzle
+    vec2  d   = Mj*vec2(1.0, 0.0);
+    vec2  rel = S.xy - o;
+    float t   = dot(rel, d);
+    if (t <= 0.0) continue;
+    vec2  qv  = d*t - rel;                            // closest approach, offset
+    float pp  = length(qv);
+    if (pp > R*1.35) continue;                        // misses this hull
+    float t0  = t - sqrt(max(R*R*1.9 - pp*pp, 0.0));  // where it arrives
+    float blk = 0.0;
+    for (int k = 0; k < 4; k++){                      // a nearer hull shadows me
+      if (k == j || k == i || k >= uNShip) continue;
+      vec4 Sk = uShip[k]; if (Sk.w < 0.5) continue;
+      vec2  rk = Sk.xy - o;
+      float tk = dot(rk, d);
+      if (tk <= 0.0 || tk >= t0) continue;
+      if (length(rk - d*tk) < R) blk = 1.0;
     }
+    for (int k = 0; k < 4; k++){                      // and so does cover
+      if (k >= uNPrism) break;
+      vec2  rp = uPrism[k].xy - o;
+      float tp = clamp(dot(rp, d), 0.0, t0);
+      if (tp > 1e-5 && length(rp - d*tp) < uPrism[k].z) blk = 1.0;
+    }
+    if (blk > 0.5) continue;
+    float a = 1.0 - smoothstep(R*0.50, R*1.35, pp);
+    if (a <= impAmt) continue;
+    impAmt = a;
+    vec2 ep = qv - d*sqrt(max(R*R*2.9 - pp*pp, 0.0));  // entry on the shell
+    imp = M*normalize(ep + vec2(1e-6));
   }
+
+  /* ---------------- shield shell, far skin + near skin -------------------
+     Drawn here so the hull covers the far half of the bubble, and once more
+     after the hull below so the near half passes over the top of it.      */
+  float sv = clamp(A.x, 0.0, 1.0);
+  if (sv > 0.004)
+    sh_shell(col, ql, pxl, sv, liv, hue, seed, kl, imp, impAmt, self, 2.0);
 
   float m = 1.0 - smoothstep(-pxl, pxl, dl);
   if (m <= 0.002) return;
@@ -1867,6 +2108,10 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
   }
 
   col = mix(col, base, m);
+
+  /* the near skin of the bubble, laid back over the craft it encloses */
+  if (sv > 0.004)
+    sh_shell(col, ql, pxl, sv, liv, hue, seed, kl, imp, impAmt, self, m);
 
   /* ---------------- the local player ------------------------------------
      A soft livery halo the eye finds instantly without adding UI chrome.   */
@@ -2337,16 +2582,18 @@ const VS_DEBRIS = `#version 300 es
 layout(location=0) in vec2 aCorner;
 layout(location=1) in vec4 aPos;      // x, y, rot, hull-span of this section
 layout(location=2) in vec4 aCol;      // livery rgb, burn
-layout(location=3) in vec4 aExt;      // tear seed, part index, -, -
+layout(location=3) in vec4 aExt;      // tear seed, part index, heat, flicker
 uniform vec2 uRes; uniform float uH; uniform vec2 uOff; uniform vec2 uJitter;
 uniform float uHullR;
 out vec2 vP; out vec4 vCol; out float vSeed; out float vPart; out float vSpan; out float vScale;
+out vec2 vHeat; out vec2 vWorld;
 void main(){
   float r = aPos.w * uHullR * 1.55;             // section, plus room for its shadow
   float c = cos(aPos.z), s = sin(aPos.z);
   vec2 local = aCorner * r;
   vec2 world = aPos.xy + vec2(local.x*c - local.y*s, local.x*s + local.y*c);
   vP = aCorner; vCol = aCol; vSeed = aExt.x; vPart = aExt.y; vSpan = aPos.w;
+  vHeat = aExt.zw; vWorld = world;
   vScale = r * uH;
   vec2 sp = world*uH + uOff;
   vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
@@ -2356,9 +2603,19 @@ void main(){
 const FS_DEBRIS = `#version 300 es
 precision highp float;
 in vec2 vP; in vec4 vCol; in float vSeed; in float vPart; in float vSpan; in float vScale;
+in vec2 vHeat;                        // heat 0..1, flicker
+in vec2 vWorld;
+uniform vec4 uFireL[4];               // x, y, falloff radius, intensity
+uniform int  uNFireL;
 out vec4 fragColor;
 
 float h11(float x){ return fract(sin(x*127.1)*43758.5453); }
+float h21f(vec2 p){ p = fract(p*vec2(123.34,345.45)); p += dot(p,p+34.345); return fract(p.x*p.y); }
+float vnf(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(h21f(i),h21f(i+vec2(1,0)),f.x), mix(h21f(i+vec2(0,1)),h21f(i+vec2(1,1)),f.x), f.y);
+}
+float fbmf(vec2 p){ float s=0.0,a=0.5,n=0.0; for(int i=0;i<3;i++){ s+=a*vnf(p); n+=a; p=p*2.07+5.1; a*=0.5; } return s/n; }
 float sdSeg(vec2 p, vec2 a, vec2 b){
   vec2 pa=p-a, ba=b-a; float h=clamp(dot(pa,ba)/dot(ba,ba),0.0,1.0);
   return length(pa-ba*h);
@@ -2407,55 +2664,121 @@ float tornCut(vec2 q, vec2 c, vec2 h, float seed, float span){
   float f = 11.0 / max(span, 0.05);
   float a = 0.055 * span;
   float rip = a*sin(dot(q, vec2(f, f*0.78)) + seed*21.0)
-            + a*0.55*sin(dot(q, vec2(-f*1.4, f*1.6)) + seed*11.0);
+            + a*0.55*sin(dot(q, vec2(-f*1.4, f*1.6)) + seed*11.0)
+            + a*0.30*sin(dot(q, vec2(f*2.7, -f*2.2)) + seed*37.0);
   return b + rip;
 }
 
-float sectionSD(vec2 q, float part, float seed, float span){
-  vec2 c, h; partBox(part, c, h);
+float edgeLitRim(vec3 n){ return pow(1.0 - clamp(n.z, 0.0, 1.0), 2.5); }
+float sectionSD(vec2 q, vec2 c, vec2 h, float seed, float span){
   return max(hullSil(q), tornCut(q, c, h, seed, span));
+}
+
+/* Incandescence of steel, cooling. Emissive, HDR: the hot end blows out. */
+vec3 glowRamp(float t){
+  vec3 c = mix(vec3(0.30,0.030,0.006), vec3(1.30,0.230,0.020), smoothstep(0.05,0.42,t));
+  c = mix(c, vec3(3.60,1.35,0.150), smoothstep(0.42,0.74,t));
+  c = mix(c, vec3(8.00,5.20,2.400), smoothstep(0.74,1.00,t));
+  return c;
 }
 
 void main(){
   vec2 c, h; partBox(vPart, c, h);
   vec2 q = vP * vSpan + c;                    // back into hull-local space
 
-  float d = sectionSD(q, vPart, vSeed, vSpan);
+  float dCut  = tornCut(q, c, h, vSeed, vSpan);
+  float d = max(hullSil(q), dCut);
+  float px = max(fwidth(q.x), 1e-5);          // one screen pixel, in hull units
   float w = max(fwidth(d), 1e-4);
   float m = 1.0 - smoothstep(-w, w, d);
 
   /* contact shadow, offset with the key light from upper-left */
-  float ds = sectionSD(q - vec2(0.055, 0.085)*vSpan, vPart, vSeed, vSpan);
-  float sh = (1.0 - smoothstep(-0.01, 0.16*vSpan, ds)) * 0.55;
+  vec2 so = vec2(2.6, 3.6)*px;
+  float ds = sectionSD(q - so, c, h, vSeed, vSpan);
+  float sh = (1.0 - smoothstep(-w, 5.0*px, ds)) * 0.78;
   if (m < 0.002 && sh < 0.002) { fragColor = vec4(0.0); return; }
 
   /* A torn section is a flat plate lying at its own angle, so the facing is a
      per-piece constant; per-pixel screen derivatives gave a 2x2 stipple. */
   float tilt = (h11(vSeed + 7.0) - 0.5) * 1.7;
   float yaw  = h11(vSeed + 11.0) * 6.2831853;
-  vec3  n    = normalize(vec3(sin(tilt)*cos(yaw), sin(tilt)*sin(yaw), cos(tilt)));
+  vec3  nFlat= normalize(vec3(sin(tilt)*cos(yaw), sin(tilt)*sin(yaw), cos(tilt)));
+  /* The plate has thickness: within a few pixels of the boundary the shading
+     normal rolls over the cut face. Without this every shard is one flat tone
+     and reads as paper, however good its outline is. */
+  float e = 1.3*px;
+  vec2 gr = vec2(sectionSD(q + vec2(e,0.0), c, h, vSeed, vSpan) - sectionSD(q - vec2(e,0.0), c, h, vSeed, vSpan),
+                 sectionSD(q + vec2(0.0,e), c, h, vSeed, vSpan) - sectionSD(q - vec2(0.0,e), c, h, vSeed, vSpan));
+  gr = gr / (2.0*e);
+  float roll = smoothstep(0.0, 3.2*px, -d);
+  vec3  n    = normalize(mix(vec3(gr*1.15, 0.55), nFlat, roll));
   vec3  L    = normalize(vec3(-0.6, -0.75, 0.65));
+  vec3  V    = vec3(0.0, 0.0, 1.0);
   float lam  = clamp(dot(n, L), 0.0, 1.0);
+  vec3  H    = normalize(L + V);
 
-  float bevel = smoothstep(0.0, 0.055*vSpan, -d);
+  float bevel = smoothstep(0.0, 3.5*px, -d);
   float burn  = clamp(vCol.a, 0.0, 1.0);
+  float heat  = clamp(vHeat.x, 0.0, 1.0);
 
-  vec3 metal = mix(vec3(0.145,0.150,0.170), vec3(0.048,0.044,0.050), burn);
-  vec3 base  = metal * (0.42 + 0.85*lam) * (0.55 + 0.45*bevel);
+  /* --- material: dark anodised alloy, not painted plastic ---------------- */
+  float grain = fbmf(vec2(dot(q, vec2(cos(yaw), sin(yaw)))/(0.55*px),
+                          dot(q, vec2(-sin(yaw), cos(yaw)))/(7.0*px)));
+  vec3 metal = mix(vec3(0.128,0.131,0.146), vec3(0.064,0.060,0.068), burn)
+             * (0.78 + 0.44*h11(vSeed + 23.0));
+  metal *= 0.82 + 0.36*grain;                          // brushed, along the panel
+  vec3 base = metal * (0.18 + 1.15*lam);
+  base += metal * 1.10 * pow(clamp(dot(n, H), 0.0, 1.0), 20.0) * (0.5 + 0.9*grain);
+  base += vec3(0.016,0.018,0.026) * (0.35 + 0.65*(1.0 - lam));   // cool fill from the wall
 
-  /* the interference film survives the wreck, dimmed */
-  base += vCol.rgb * (0.075 + 0.085*lam) * bevel * (1.0 - burn*0.55);
-  base += vCol.rgb * pow(lam, 5.0) * 0.16;
+  /* what is left of the interference coat: a sheen at grazing angles only */
+  float sheen = pow(1.0 - clamp(n.z, 0.0, 1.0), 2.0);
+  base += vCol.rgb * sheen * 0.032 * (1.0 - burn*0.7) * (0.4 + 0.6*lam);
+  base += vCol.rgb * pow(lam, 8.0) * 0.05;
 
-  /* structure: the spar line that ran through this section */
-  float spar = 1.0 - smoothstep(0.0, 0.020, abs(q.y) - 0.02*vSpan);
-  base *= 1.0 - 0.18*spar*bevel;
+  /* structure: the spar line that ran through this section, and panel joints */
+  float spar = 1.0 - smoothstep(0.0, 1.6*px, abs(q.y) - 1.2*px);
+  base *= 1.0 - 0.34*spar*bevel;
+  float panel = 1.0 - smoothstep(0.0, 1.3*px, abs(fract(q.x*(4.5/max(vSpan,0.1)) + vSeed*3.0) - 0.5) - 0.5*px);
+  base *= 1.0 - 0.16*panel*bevel;
 
-  /* scorching, heaviest at the torn end */
-  base *= 1.0 - 0.40*burn*smoothstep(-0.15, 0.5, dot(vP, vec2(0.7,0.7)));
+  /* soot: heaviest at the torn end, streaked by the blast */
+  float soot = smoothstep(14.0*px, -1.0*px, dCut);
+  soot = clamp(soot*(0.55 + 0.75*fbmf(q/(9.0*px) + vSeed*9.0)), 0.0, 1.0);
+  base *= 1.0 - 0.55*burn*soot;
 
-  float edge = (1.0 - smoothstep(0.0, w*2.0, abs(d))) * (1.0 - bevel*0.35);
-  base += mix(vec3(0.32,0.35,0.42), vCol.rgb, 0.4) * edge * (0.12 + 0.26*lam);
+  /* --- the tear itself ---------------------------------------------------
+     The cut edge is the only place that was ever molten, so that is the only
+     place that glows. It cools from the outside in and flickers as the piece
+     tumbles. */
+  float band  = 1.0 - smoothstep(0.0, 9.0*px, abs(dCut));
+  float lip   = 1.0 - smoothstep(0.0, 2.4*px, abs(dCut));
+  float rough = 0.35 + 0.95*fbmf(q/(4.5*px) + vSeed*17.0);
+  float hot   = clamp(heat*vHeat.y*rough*(0.55*band + 1.05*lip), 0.0, 1.0);
+  base += glowRamp(clamp(hot*0.60, 0.0, 1.0)) * hot * 0.62 * m;
+  // cold, the same lip is bright bare metal where the coating tore away
+  base += vec3(0.045,0.048,0.058) * lip * (0.15 + 0.85*lam*lam) * (1.0 - heat*0.85);
+
+  /* --- lit by its own explosion -------------------------------------------
+     Wreckage thrown out of a fireball is lit by it: warm on the side facing
+     the blast, and rimmed where the plate turns away. Without this the shards
+     and the fire read as two effects that happen to share a screen. */
+  for (int i = 0; i < 4; i++) {
+    if (i >= uNFireL) break;
+    vec4 Lp = uFireL[i];
+    vec2 dv = Lp.xy - vWorld;
+    float dd = length(dv)/max(Lp.z, 1e-5);
+    float att = Lp.w/(1.0 + dd*dd*3.2);
+    if (att < 0.002) continue;
+    vec3 Ld2 = normalize(vec3(dv/max(length(dv),1e-6), 0.70));
+    float lam2 = clamp(dot(n, Ld2), 0.0, 1.0);
+    vec3 alb = metal*1.5 + vec3(0.020,0.016,0.013);   // fire is bright enough to
+    base += alb * vec3(1.45,0.40,0.06) * att * (0.14 + 1.35*lam2);   // find the albedo
+    base += vec3(1.60,0.60,0.16) * att * edgeLitRim(n) * 0.5;
+  }
+
+  float edge = (1.0 - smoothstep(0.0, 1.6*px, abs(d)));
+  base += mix(vec3(0.17,0.19,0.24), vCol.rgb, 0.25) * edge * (0.03 + 0.30*lam*lam);
 
   fragColor = vec4(base * m, m + sh*(1.0 - m));
 }`;
@@ -2464,64 +2787,211 @@ void main(){
 /* ========================== EXPLOSION & SMOKE ============================
    Purely cosmetic, so it lives outside the lockstep state: it is *triggered*
    deterministically (a ship dies on every peer at the same substep) but the
-   puffs themselves never enter the state hash or the resync payload. */
+   particles themselves never enter the state hash or the resync payload.
+
+   Four instanced passes share one 12-float particle format:
+     aPos = x, y, radius, alpha        aCol = rgb, seed
+     aExt = age 0..1, per-pass, per-pass, rotation (or streak vector)         */
+const GLSL_VFX = `
+float h21(vec2 p){ p = fract(p*vec2(123.34,345.45)); p += dot(p,p+34.345); return fract(p.x*p.y); }
+float vn(vec2 p){
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y);
+}
+float fbm2(vec2 p){ return 0.62*vn(p) + 0.38*vn(p*2.07 + 11.3); }
+float fbm3(vec2 p){ float s=0.0,a=0.5,n=0.0; for(int i=0;i<3;i++){ s+=a*vn(p); n+=a; p=p*2.03+3.7; a*=0.5; } return s/n; }
+float fbm4(vec2 p){ float s=0.0,a=0.5,n=0.0; for(int i=0;i<4;i++){ s+=a*vn(p); n+=a; p=p*2.03+3.7; a*=0.5; } return s/n; }
+/* Blackbody-ish ramp for burning gas. Linear HDR: the top of it is 16x display
+   white, which is what puts a real detonation through the bloom. */
+vec3 fireRamp(float t){
+  vec3 c = mix(vec3(0.016,0.015,0.017), vec3(0.34,0.040,0.010), smoothstep(0.04,0.30,t));
+  c = mix(c, vec3(1.45,0.330,0.030), smoothstep(0.30,0.55,t));
+  c = mix(c, vec3(4.20,1.600,0.170), smoothstep(0.55,0.78,t));
+  c = mix(c, vec3(16.0,10.20,5.400), smoothstep(0.80,1.00,t));
+  return c;
+}`;
+
 const VS_PUFF = `#version 300 es
 layout(location=0) in vec2 aCorner;
-layout(location=1) in vec4 aPos;      // x, y, radius, opacity
+layout(location=1) in vec4 aPos;      // x, y, radius, alpha
 layout(location=2) in vec4 aCol;      // rgb, seed
+layout(location=3) in vec4 aExt;      // age, e1, e2, rotation
 uniform vec2 uRes; uniform float uH; uniform vec2 uOff; uniform vec2 uJitter;
-out vec2 vP; out vec4 vCol; out float vA; out float vScale;
+out vec2 vP; out vec4 vCol; out float vA; out float vScale; out vec4 vExt;
 void main(){
-  vec2 world = aPos.xy + aCorner * aPos.z;
-  vP = aCorner; vCol = aCol; vA = aPos.w; vScale = aPos.z * uH;
+  float c = cos(aExt.w), s = sin(aExt.w);
+  vec2 local = vec2(aCorner.x*c - aCorner.y*s, aCorner.x*s + aCorner.y*c) * aPos.z;
+  vec2 world = aPos.xy + local;
+  vP = aCorner; vCol = aCol; vA = aPos.w; vExt = aExt; vScale = aPos.z * uH;
   vec2 sp = world*uH + uOff;
   vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
   gl_Position = vec4(clip - uJitter/uRes*2.0, 0.0, 1.0);
 }`;
 
-const FS_SMOKE = `#version 300 es
+/* Embers are drawn as capsules stretched along their own velocity: a hot
+   fragment moving 1.5 screen-widths a second cannot be a round dot. */
+const VS_STREAK = `#version 300 es
+layout(location=0) in vec2 aCorner;
+layout(location=1) in vec4 aPos;      // x, y, radius, alpha
+layout(location=2) in vec4 aCol;      // rgb, seed
+layout(location=3) in vec4 aExt;      // age, temperature, streak vector xy
+uniform vec2 uRes; uniform float uH; uniform vec2 uOff; uniform vec2 uJitter;
+out vec2 vP; out vec4 vCol; out float vA; out float vAsp; out vec4 vExt;
+void main(){
+  vec2 v = aExt.zw;
+  float len = length(v);
+  vec2 dir = len > 1e-7 ? v/len : vec2(1.0, 0.0);
+  vec2 per = vec2(-dir.y, dir.x);
+  float r  = max(aPos.z, 1e-6);
+  float hx = r + len*0.5;
+  vec2 centre = aPos.xy - dir*len*0.5;
+  vec2 world  = centre + dir*(aCorner.x*hx) + per*(aCorner.y*r);
+  vP = aCorner; vCol = aCol; vA = aPos.w; vExt = aExt; vAsp = hx/r;
+  vec2 sp = world*uH + uOff;
+  vec2 clip = vec2(sp.x/uRes.x*2.0-1.0, 1.0-sp.y/uRes.y*2.0);
+  gl_Position = vec4(clip - uJitter/uRes*2.0, 0.0, 1.0);
+}`;
+
+/* The fireball. Emissive and opaque at once: the colour is premultiplied by a
+   density that also occludes what is behind it, so the hot gas glows while the
+   soot in it blocks the arena — which is what a real fireball does. */
+const FS_FIRE = `#version 300 es
 precision highp float;
-in vec2 vP; in vec4 vCol; in float vA; in float vScale;
+in vec2 vP; in vec4 vCol; in float vA; in float vScale; in vec4 vExt;
 out vec4 fragColor;
-float h21(vec2 p){ p=fract(p*vec2(123.34,345.45)); p+=dot(p,p+34.345); return fract(p.x*p.y); }
-float vn(vec2 p){
-  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
-  return mix(mix(h21(i),h21(i+vec2(1,0)),f.x), mix(h21(i+vec2(0,1)),h21(i+vec2(1,1)),f.x), f.y);
-}
-float fbm3(vec2 p){ float s=0.0,a=0.5; for(int i=0;i<3;i++){ s+=a*vn(p); p*=2.03; a*=0.5; } return s; }
+${GLSL_VFX}
 void main(){
   float r = length(vP);
   if (r > 1.0) { fragColor = vec4(0.0); return; }
-  /* a billow, not a disc: the edge is eaten away by noise that turns over as
-     the puff ages, so a plume churns instead of scaling uniformly */
-  vec2 q = vP * 1.6 + vCol.a * 31.0;
-  float n = fbm3(q + vec2(vCol.a*7.0, -vCol.a*5.0));
-  float edge = 1.0 - smoothstep(0.35, 1.0, r + (n - 0.5) * 0.75);
-  float body = edge * edge;
-  if (body < 0.003) { fragColor = vec4(0.0); return; }
+  float u = vExt.x, T0 = vExt.y, seed = vCol.a;
 
-  /* lit from the upper-left like everything else, denser toward the core */
-  float lit = 0.55 + 0.45 * dot(normalize(vec3(vP, 0.85)), normalize(vec3(-0.6,-0.75,0.6)));
-  vec3 col = vCol.rgb * (0.55 + 0.75*lit) * (0.65 + 0.5*n);
-  float a = body * vA;
-  fragColor = vec4(col * a, a);            // premultiplied
+  if (vExt.z > 0.5) {                       // soot scorched onto the deck
+    float n = fbm3(vP*2.4 + seed*47.0);
+    float mk = 1.0 - smoothstep(0.20, 1.0, r + (n-0.5)*0.55);
+    float a  = mk*mk*vA;
+    fragColor = vec4(vec3(0.0032,0.0034,0.0040)*a, a);
+    return;
+  }
+
+  /* churn: the sampling domain is warped by its own noise, and the warp grows
+     with age. That is what makes the ball roll and fold instead of scaling. */
+  vec2 q = vP*1.25 + seed*23.0;
+  vec2 w = vec2(fbm2(q*1.7 + vec2(0.0, -u*1.7)), fbm2(q*1.7 + vec2(4.7, u*1.35)));
+  q += (w - 0.5) * (0.55 + 1.25*u);
+  float n = fbm4(q*(1.65 + 1.30*fract(seed*7.31)));
+
+  float edge = 0.52 + 0.52*n;               // lumpy, eaten silhouette
+  float dens = smoothstep(edge, edge*0.18, r) * (0.60 + 0.62*n);
+  if (dens < 0.005) { fragColor = vec4(0.0); return; }
+
+  /* hot where it is dense and fresh; the wisps torn off the edge are already
+     soot, which is what puts black smoke inside the flame */
+  float T = clamp(T0 * (0.30 + 0.82*pow(dens, 1.15)) * (0.60 + 0.55*n), 0.0, 1.0);
+  vec3 col = fireRamp(T);
+  col *= 0.36 + 0.64*smoothstep(0.12, 0.78, n);      // soot lanes through the flame
+  float a = clamp(dens*vA, 0.0, 1.0);
+  fragColor = vec4(col*a, a);
+}`;
+
+/* Smoke. Lit by the same key as the rest of the scene, self-shadowed by
+   sampling its own density toward the light, and still glowing from inside
+   while the fire that made it is alive. */
+const FS_SMOKE = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vCol; in float vA; in float vScale; in vec4 vExt;
+out vec4 fragColor;
+${GLSL_VFX}
+void main(){
+  float r = length(vP);
+  if (r > 1.0) { fragColor = vec4(0.0); return; }
+  float u = vExt.x, warm = vExt.y, shade = vExt.z, seed = vCol.a;
+
+  /* One warped domain, sampled three times: here, a step toward the key, and a
+     step away from it. The three samples are the whole lighting model — the
+     difference gives the facing, the sample toward the light gives the shadow
+     the plume casts on itself, and the far one lets the back edge go dark. */
+  vec2 base = vP*1.10 + seed*31.0;
+  vec2 w = vec2(fbm2(base*1.75 + vec2(0.0, -u*0.85)), fbm2(base*1.75 + vec2(3.1, u*0.62)));
+  vec2 q0 = base + (w - 0.5)*(0.60 + 0.85*u);
+  vec2 Ld = vec2(-0.62,-0.78);
+
+  float wisp = fbm2(q0*5.2 + seed*13.0);            // torn edges, worse with age
+  float thin = 1.0 - 0.42*u;                        // it thins as it spreads
+
+  float n0 = fbm3(q0*1.95);
+  float e0 = 0.36 + 0.64*n0 + (wisp - 0.5)*(0.26 + 0.50*u)*(0.35 + 0.95*r);
+  float d0 = smoothstep(e0, e0*0.10, r) * (0.44 + 0.80*n0) * thin;
+  if (d0 < 0.004) { fragColor = vec4(0.0); return; }
+
+  float nL = fbm2((q0 + Ld*0.44)*1.95);
+  float eL = 0.36 + 0.64*nL;
+  float dL = smoothstep(eL, eL*0.10, length(vP + Ld*0.38)) * (0.44 + 0.80*nL) * thin;
+
+  float nB = fbm2((q0 - Ld*0.34)*1.95);
+  float eB = 0.36 + 0.64*nB;
+  float dB = smoothstep(eB, eB*0.10, length(vP - Ld*0.30)) * (0.44 + 0.80*nB) * thin;
+
+  float lit    = clamp((d0 - dL)*3.2 + 0.10, 0.0, 1.7);
+  float shadow = 1.0 - clamp(dL*1.05, 0.0, 0.84);
+  float back   = clamp((dB - d0)*1.3, 0.0, 0.90);
+
+  /* soot is not grey: it is a very dark warm-neutral that only the key lifts,
+     and the wall's own cool bounce fills the shadow side */
+  vec3 dark = vec3(0.0062,0.0066,0.0092);
+  vec3 key  = vec3(0.0900,0.0888,0.0860);
+  vec3 fill = vec3(0.0080,0.0092,0.0140);
+  vec3 col  = dark + key*shade*lit*shadow*(1.0 - 0.60*back) + fill*(0.35 + 0.65*back);
+  col += vec3(0.55,0.115,0.008) * warm * (0.06 + 1.25*d0);  // lit from inside
+  float a = clamp(d0*vA, 0.0, 1.0);
+  fragColor = vec4(col*a, a);
 }`;
 
 const FS_SPARK = `#version 300 es
 precision highp float;
-in vec2 vP; in vec4 vCol; in float vA; in float vScale;
+in vec2 vP; in vec4 vCol; in float vA; in float vAsp; in vec4 vExt;
 out vec4 fragColor;
+${GLSL_VFX}
+void main(){
+  vec2 q = vec2(vP.x*vAsp, vP.y);
+  float hx = max(vAsp - 1.0, 0.0);
+  float t  = clamp((q.x + hx)/(2.0*hx + 1e-4), 0.0, 1.0);     // 0 tail .. 1 head
+  float d  = length(q - vec2(clamp(q.x, -hx, hx), 0.0));
+  float prof = 0.30 + 0.70*t;                                 // thins to the tail
+  float core = exp(-(d*d)/(prof*prof*0.30));
+  float glow = 1.0/(1.0 + d*d*20.0); glow *= glow;
+  vec3  c = fireRamp(clamp(0.26 + 0.56*vExt.y, 0.0, 1.0));
+  float I = (core*1.15 + glow*0.10) * (0.20 + 0.80*t) * vA;
+  fragColor = vec4(c*I, 1.0);
+}`;
+
+/* Flash, shock front and the light the detonation throws into the air. */
+const FS_GLOW = `#version 300 es
+precision highp float;
+in vec2 vP; in vec4 vCol; in float vA; in float vScale; in vec4 vExt;
+out vec4 fragColor;
+${GLSL_VFX}
 void main(){
   float r = length(vP);
   if (r > 1.0) { fragColor = vec4(0.0); return; }
-  float core = exp(-r*r*16.0);
-  float glow = 1.0/(1.0 + r*r*26.0); glow *= glow;
-  /* a four-point flare, so a hot ember reads as light rather than as a dot */
-  float sp = pow(max(0.0,1.0-abs(vP.y)*26.0),3.0)*exp(-abs(vP.x)*2.6)
-           + pow(max(0.0,1.0-abs(vP.x)*26.0),3.0)*exp(-abs(vP.y)*2.6);
-  float win = smoothstep(1.0, 0.5, r);
-  vec3 c = mix(vCol.rgb, vec3(1.0), clamp(core*1.3,0.0,1.0)*0.7);
-  fragColor = vec4(c * (core*1.5 + glow*0.35 + sp*0.5) * vA * win, 1.0);
+  float u = vExt.x, kind = vExt.y, seed = vCol.a;
+  float I;
+  if (kind < 0.5) {                       // the core: blown out, brief, soft
+    float core  = exp(-r*r*11.0);
+    float skirt = 1.0/(1.0 + r*r*26.0); skirt *= skirt;
+    float n = fbm3(vP*2.2 + seed*17.0);
+    I = (core + skirt*0.45) * (0.86 + 0.28*n) * (1.0 - smoothstep(0.80, 1.0, r));
+  } else if (kind < 1.5) {                // shock front: a thin ring, thinning
+    float ang = atan(vP.y, vP.x);
+    float wob = fbm2(vec2(ang*2.4, seed*11.0)) - 0.5;      // the front is not round
+    float wdt = mix(0.07, 0.020, u);
+    float ring = exp(-pow((r - 0.70 - wob*0.09)/wdt, 2.0));
+    float n = fbm3(vP*4.0 + seed*29.0);
+    I = ring * (0.35 + 1.10*n) * (1.0 - smoothstep(0.90, 1.0, r));
+  } else {                                // light thrown into the surrounding air
+    float g = 1.0/(1.0 + r*r*3.4); g *= g;
+    I = g * (1.0 - smoothstep(0.75, 1.0, r));
+  }
+  fragColor = vec4(vCol.rgb * I * vA, 1.0);
 }`;
 
 /* --------------------------------- programs ------------------------------- */
@@ -2535,8 +3005,10 @@ const pStreak= prog(VS_FULL, FS_STREAK);
 const pComp  = prog(VS_FULL, FS_COMP);
 const pAccum = prog(VS_FULL, FS_ACCUM);
 const pDebris = prog(VS_DEBRIS, FS_DEBRIS);
+const pFire   = prog(VS_PUFF, FS_FIRE);
 const pSmoke  = prog(VS_PUFF, FS_SMOKE);
-const pSpark  = prog(VS_PUFF, FS_SPARK);
+const pGlow   = prog(VS_PUFF, FS_GLOW);
+const pSpark  = prog(VS_STREAK, FS_SPARK);
 
 /* ------------------------------- geometry buf ----------------------------- */
 const quadBuf = gl.createBuffer();
@@ -2582,21 +3054,23 @@ function makePuffVao() {
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
   gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 32, 0);  gl.vertexAttribDivisor(1, 1);
-  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 32, 16); gl.vertexAttribDivisor(2, 1);
+  gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 4, gl.FLOAT, false, 48, 0);  gl.vertexAttribDivisor(1, 1);
+  gl.enableVertexAttribArray(2); gl.vertexAttribPointer(2, 4, gl.FLOAT, false, 48, 16); gl.vertexAttribDivisor(2, 1);
+  gl.enableVertexAttribArray(3); gl.vertexAttribPointer(3, 4, gl.FLOAT, false, 48, 32); gl.vertexAttribDivisor(3, 1);
   gl.bindVertexArray(null);
   return { buf, vao };
 }
-const smokeGL = makePuffVao(), sparkGL = makePuffVao();
-let puffData = new Float32Array(512 * 8);
+const fireGL = makePuffVao(), smokeGL = makePuffVao(),
+      sparkGL = makePuffVao(), glowGL = makePuffVao();
+let puffData = new Float32Array(512 * 12);
 
 /** Upload a particle list and draw it instanced. */
 function drawPuffs(prog, glo, list, pack) {
   if (!list.length) return;
-  if (puffData.length < list.length * 8) puffData = new Float32Array(list.length * 8);
-  for (let i = 0; i < list.length; i++) pack(list[i], i * 8, puffData);
+  if (puffData.length < list.length * 12) puffData = new Float32Array(list.length * 12);
+  for (let i = 0; i < list.length; i++) pack(list[i], i * 12, puffData);
   gl.bindBuffer(gl.ARRAY_BUFFER, glo.buf);
-  gl.bufferData(gl.ARRAY_BUFFER, puffData.subarray(0, list.length * 8), gl.DYNAMIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, puffData.subarray(0, list.length * 12), gl.DYNAMIC_DRAW);
   gl.useProgram(prog.p);
   gl.uniform2f(prog.u.uRes, W, H);
   gl.uniform1f(prog.u.uH, viewScale);
@@ -2736,6 +3210,7 @@ function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % 
 function resetAccum() { accN = 0; }
 let hoverDisc = 0, hoverEm = -1, lastHoverDisc = 0, lastHoverEm = -1;
 
+const fireLUni = new Float32Array(16);
 let debrisData = new Float32Array(64 * 12);
 let jitterX = 0, jitterY = 0;
 const prismUni = new Float32Array(16), prism2Uni = new Float32Array(16);
@@ -2789,7 +3264,23 @@ function render(dt) {
     gl.uniform2f(u.uHoverEm, hoverEm, 1);
   });
 
-  /* ---- 1b. wreckage (alpha, under the beams) ---- */
+  /* ---- 1b. fireball and deck scorch (alpha, under the wreckage) ----
+     The fire goes down first: wreckage is thrown clear of it and reads in
+     front of it, which is what makes the two look like one event. */
+  if (vfx.fire.length) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
+    gl.viewport(0, 0, W, H);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);   // premultiplied
+    drawPuffs(pFire, fireGL, vfx.fire, (p, o, a) => {
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
+      a[o+4] = 0; a[o+5] = 0; a[o+6] = 0; a[o+7] = p.seed;
+      a[o+8] = Math.min(1, p.t / p.life); a[o+9] = p.T || 0; a[o+10] = p.kind; a[o+11] = p.rot;
+    });
+    gl.disable(gl.BLEND);
+  }
+
+  /* ---- 1c. wreckage (alpha, under the beams) ---- */
   const dbg = (G.state && G.state.debris) || [];
   if (dbg.length) {
     if (debrisData.length < dbg.length * 12) debrisData = new Float32Array(dbg.length * 12);
@@ -2798,7 +3289,12 @@ function render(dt) {
       debrisData[o] = d.x; debrisData[o+1] = d.y; debrisData[o+2] = d.rot; debrisData[o+3] = d.size;
       debrisData[o+4] = L.rgb[0]; debrisData[o+5] = L.rgb[1]; debrisData[o+6] = L.rgb[2];
       debrisData[o+7] = d.burn;
-      debrisData[o+8] = d.shape; debrisData[o+9] = d.part; debrisData[o+10] = 0; debrisData[o+11] = 0;
+      // heat is a client-side clock keyed by ship: the wreck cools on screen
+      // without the debris itself growing a cosmetic field
+      const ht = wreckHeat(d.idx) * (0.35 + 0.65 * d.burn);
+      const fk = 0.72 + 0.28 * Math.sin(time * 9.0 + d.shape * 31.0)
+                             * Math.sin(time * 3.1 + d.shape * 11.0);
+      debrisData[o+8] = d.shape; debrisData[o+9] = d.part; debrisData[o+10] = ht; debrisData[o+11] = fk;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, debrisBuf);
     gl.bufferData(gl.ARRAY_BUFFER, debrisData.subarray(0, dbg.length * 12), gl.DYNAMIC_DRAW);
@@ -2813,13 +3309,26 @@ function render(dt) {
     gl.uniform2f(pDebris.u.uOff, viewOffX, viewOffY);
     gl.uniform2f(pDebris.u.uJitter, jx, jy);
     gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
+    // the fireballs that are still burning, as lights on the wreckage
+    let nl = 0;
+    for (const w of vfx.wrecks) {
+      if (nl >= 4) break;
+      const k = Math.max(0, 1 - w.t / 0.95);
+      const inten = k * k * 4.2 * (0.85 + 0.15 * Math.sin(time * 21 + w.idx));
+      if (inten < 0.01) continue;
+      fireLUni[nl*4] = w.x; fireLUni[nl*4+1] = w.y;
+      fireLUni[nl*4+2] = RULES.HULL_R * 7.0; fireLUni[nl*4+3] = inten;
+      nl++;
+    }
+    gl.uniform4fv(pDebris.u.uFireL, fireLUni);
+    gl.uniform1i(pDebris.u.uNFireL, nl);
     gl.bindVertexArray(vaoDebris);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, dbg.length);
     gl.bindVertexArray(null);
     gl.disable(gl.BLEND);
   }
 
-  /* ---- 1c. smoke (alpha, beneath the beams) ---- */
+  /* ---- 1d. smoke (alpha, over the wreckage, beneath the beams) ---- */
   if (vfx.puffs.length) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
     gl.viewport(0, 0, W, H);
@@ -2827,7 +3336,8 @@ function render(dt) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     drawPuffs(pSmoke, smokeGL, vfx.puffs, (p, o, a) => {
       a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
-      a[o+4] = p.cr; a[o+5] = p.cg; a[o+6] = p.cb; a[o+7] = p.seed;
+      a[o+4] = 0; a[o+5] = 0; a[o+6] = 0; a[o+7] = p.seed;
+      a[o+8] = Math.min(1, p.t / p.life); a[o+9] = p.warm; a[o+10] = p.shade; a[o+11] = p.rot;
     });
     gl.disable(gl.BLEND);
   }
@@ -2861,10 +3371,24 @@ function render(dt) {
   gl.bindVertexArray(vaoHot);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, hotCount);
 
+  /* ---- 2b. embers and the detonation's own light (additive) ---- */
+  if (vfx.glows.length) {
+    drawPuffs(pGlow, glowGL, vfx.glows, (p, o, a) => {
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = Math.max(0, p.a);
+      a[o+4] = p.cr; a[o+5] = p.cg; a[o+6] = p.cb; a[o+7] = p.seed;
+      a[o+8] = Math.min(1, Math.max(0, p.t) / p.life); a[o+9] = p.kind; a[o+10] = 0; a[o+11] = 0;
+    });
+  }
   if (vfx.sparks.length) {
     drawPuffs(pSpark, sparkGL, vfx.sparks, (p, o, a) => {
-      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = p.a;
-      a[o+4] = p.cr; a[o+5] = p.cg; a[o+6] = p.cb; a[o+7] = p.seed;
+      a[o] = p.x; a[o+1] = p.y; a[o+2] = p.r; a[o+3] = Math.max(0, p.a);
+      a[o+4] = 0; a[o+5] = 0; a[o+6] = 0; a[o+7] = p.seed;
+      // the streak is how far it travels in one shutter opening
+      a[o+8] = Math.min(1, Math.max(0, p.t) / p.life); a[o+9] = p.T || 0;
+      // motion blur, but never more than a ~9:1 dash however fast it is going
+      const sp = Math.hypot(p.vx, p.vy) || 1e-6;
+      const bl = Math.min(0.014 * (p.blur || 1), p.r * 9 / sp);
+      a[o+10] = p.vx * bl; a[o+11] = p.vy * bl;
     });
   }
 
@@ -4011,90 +4535,316 @@ function addPreviewBeam() {
 /* ====================== destruction: explosion & smoke ====================
    Cosmetic only. The *trigger* is deterministic — a ship dies on the same
    substep on every peer — but the particles never enter the state hash or the
-   resync payload, so they can run at frame rate and vary harmlessly per client. */
-const vfx = { puffs: [], sparks: [] };
+   resync payload, so they can run at frame rate and vary harmlessly per client.
+
+   The sequence is authored as one event rather than four systems fired at once:
+
+     0.000  detonation. A white-hot core at ~35x display white, gone in 0.12 s,
+            with a shock front that outruns it and dissipates by 0.34 s.
+     0.02   the fireball erupts out of the flash, cooling white -> amber ->
+            orange -> deep red as it churns, and throws its light onto the
+            surrounding air for half a second.
+     0.10   secondary detonations inside the wreck, two or three of them, so the
+            event rolls instead of ending on one beat.
+     0.00   embers leave on ballistic arcs, motion-streaked, flickering, the
+            fastest gone in a third of a second and the slowest still burning
+            at two.
+     0.35+  every fireball puff, as it burns out, *becomes* a smoke puff at the
+            same place with the same momentum — the smoke is the fire, cooled,
+            not a separate cloud that happens to be there.
+     0.4-2  the hottest wreckage sections trail their own smoke while their torn
+            edges are still glowing.
+     6-30   a soot scorch and the last of the column, thinning.                */
+const vfx = { fire: [], puffs: [], sparks: [], glows: [], wrecks: [] };
 let vfxSeed = 1;
 function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
+function vrng(a, b) { return a + (b - a) * vrnd(); }
+/** Live particle count, so four wrecks on screen at once cost about what one
+    does: every group is scaled by the remaining budget when it spawns. */
+function vfxLoad() { return vfx.fire.length + vfx.puffs.length + vfx.sparks.length + vfx.glows.length; }
+
+/** A smoke puff. Also the retirement path for a burnt-out fireball puff. */
+function pushSmoke(o) {
+  vfx.puffs.push({
+    x: o.x, y: o.y, vx: o.vx, vy: o.vy,
+    r: o.r, r1: o.r1, t: o.t || 0, life: o.life,
+    rot: vrnd() * TAU, spin: vrng(-0.5, 0.5), seed: vrnd(),
+    warm: o.warm || 0, wx: o.wx || 0, wy: o.wy || 0,
+    // how deep in the cloud this puff sits: the interior ones stay dark
+    shade: vrng(0.30, 1.05),
+    a: 0, peak: o.peak !== undefined ? o.peak : 0.85,
+  });
+}
 
 function spawnDestruction(sh) {
-  const L = LIVERY[sh.idx % LIVERY.length];
   const R = RULES.HULL_R;
+  const cx = sh.x, cy = sh.y;
+  // the wreck keeps the ship's momentum: the fireball and the smoke are dragged
+  // downrange, which is most of what makes a kill read as a kill in motion
+  const mvx = Math.cos(sh.heading) * sh.speed, mvy = Math.sin(sh.heading) * sh.speed;
+  const q = clamp(1 - vfxLoad() / 1100, 0.4, 1);          // shared budget
+  // one drift for the whole wreck, so its column leans instead of sitting
+  const wa = vrnd() * TAU, ws = vrng(0.010, 0.030);
+  const wx = Math.cos(wa) * ws + mvx * 0.10, wy = Math.sin(wa) * ws + mvy * 0.10;
 
-  /* the flash: brief, white-hot, and large enough to bloom */
-  vfx.sparks.push({ x: sh.x, y: sh.y, r: R * 3.2, a: 1, t: 0, life: 0.16,
-                    cr: 1, cg: 0.95, cb: 0.85, seed: vrnd(), kind: 'flash', r0: R * 3.2, r1: R * 7.5 });
+  /* ---- the detonation itself ---------------------------------------------
+     Three overlapping lights: the core (blown out, over in 0.12 s), the shock
+     front (outruns it, thin, cold-white), and the light the event throws into
+     the air around it, which is what stops the flash reading as a decal. */
+  vfx.glows.push({ kind: 0, x: cx, y: cy, r: R * 0.85, r0: R * 0.85, r1: R * 3.1, t: 0, life: 0.115,
+                   amp: 9.0, a: 0, cr: 1.0, cg: 0.94, cb: 0.84, seed: vrnd() });
+  // the ignition itself, bridging the flash into the fireball
+  vfx.glows.push({ kind: 0, x: cx, y: cy, r: R * 1.8, r0: R * 1.8, r1: R * 5.0, t: 0, life: 0.26,
+                   amp: 1.2, a: 0, cr: 1.0, cg: 0.62, cb: 0.26, seed: vrnd() });
+  vfx.glows.push({ kind: 1, x: cx, y: cy, r: R * 1.6, r0: R * 1.6, r1: R * 5.0, t: 0, life: 0.07,
+                   amp: 0.25, a: 0, cr: 1.0, cg: 0.90, cb: 0.80, seed: vrnd() });
+  vfx.glows.push({ kind: 2, x: cx, y: cy, r: R * 3.0, r0: R * 3.0, r1: R * 8.5, t: 0, life: 0.40,
+                   amp: 0.13, a: 0, cr: 1.0, cg: 0.42, cb: 0.11, seed: vrnd() });
 
-  /* embers: hot, fast, short-lived, tinted by the livery they came off */
-  for (let i = 0; i < 34; i++) {
-    const a = vrnd() * TAU, sp = (0.12 + vrnd() * 0.55);
-    const heat = 0.55 + vrnd() * 0.45;
+  /* ---- the fireball -------------------------------------------------------
+     Two scales, because one is never enough: a few big slow masses that
+     overlap into a single body, and a ring of small fast ones that tear off
+     the front of it and burn out first. */
+  const nBig = Math.round(7 * q), nSmall = Math.round(9 * q);
+  for (let i = 0; i < nBig; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.03, 0.20);
+    vfx.fire.push({
+      x: cx + Math.cos(a) * R * vrng(0, 0.30), y: cy + Math.sin(a) * R * vrng(0, 0.30),
+      vx: Math.cos(a) * sp + mvx * 0.55, vy: Math.sin(a) * sp + mvy * 0.55,
+      r: R * vrng(1.10, 1.90), r1: R * vrng(6.0, 9.0),
+      t: -vrng(0, 0.035), life: vrng(0.70, 1.25),
+      temp: vrng(0.94, 1.0), rot: vrnd() * TAU, spin: vrng(-1.4, 1.4),
+      seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+    });
+  }
+  for (let i = 0; i < nSmall; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.14, 0.44);
+    vfx.fire.push({
+      x: cx + Math.cos(a) * R * vrng(0.2, 0.9), y: cy + Math.sin(a) * R * vrng(0.2, 0.9),
+      vx: Math.cos(a) * sp + mvx * 0.6, vy: Math.sin(a) * sp + mvy * 0.6,
+      r: R * vrng(0.65, 1.20), r1: R * vrng(2.6, 4.4),
+      t: -vrng(0, 0.06), life: vrng(0.26, 0.55),
+      temp: vrng(0.52, 0.86), rot: vrnd() * TAU, spin: vrng(-2.6, 2.6),
+      seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+    });
+  }
+
+  /* ---- secondaries: the wreck goes up in stages ------------------------- */
+  const nSec = 2 + (vrnd() < 0.55 ? 1 : 0);
+  for (let k = 0; k < nSec; k++) {
+    const d = vrng(0.10, 0.40), a = vrnd() * TAU, rr = R * vrng(0.4, 1.2);
+    const sx = cx + Math.cos(a) * rr + mvx * d, sy = cy + Math.sin(a) * rr + mvy * d;
+    vfx.glows.push({ kind: 0, x: sx, y: sy, r: R * 0.9, r0: R * 0.9, r1: R * 3.4, t: -d, life: 0.13,
+                     amp: 2.6, a: 0, cr: 1.0, cg: 0.68, cb: 0.30, seed: vrnd() });
+    const n = Math.round(4 * q);
+    for (let i = 0; i < n; i++) {
+      const b = vrnd() * TAU, sp = vrng(0.06, 0.30);
+      vfx.fire.push({
+        x: sx, y: sy, vx: Math.cos(b) * sp + mvx * 0.4, vy: Math.sin(b) * sp + mvy * 0.4,
+        r: R * vrng(0.40, 0.75), r1: R * vrng(1.8, 3.2),
+        t: -d - vrng(0, 0.04), life: vrng(0.34, 0.70),
+        temp: vrng(0.80, 0.95), rot: vrnd() * TAU, spin: vrng(-2.6, 2.6),
+        seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+      });
+    }
+    for (let i = 0; i < Math.round(5 * q); i++) {
+      const b = vrnd() * TAU, sp = vrng(0.25, 1.0);
+      vfx.sparks.push({ x: sx, y: sy, vx: Math.cos(b) * sp, vy: Math.sin(b) * sp,
+        r: R * vrng(0.045, 0.10), t: -d, life: vrng(0.25, 1.1), temp: vrng(0.7, 1.0),
+        drag: vrng(0.5, 1.4), seed: vrnd(), flick: vrng(26, 60), a: 0 });
+    }
+  }
+
+  /* ---- embers ------------------------------------------------------------
+     A wide speed spread is what sells shrapnel: a few outrun everything and
+     die immediately, the slow ones tumble and glow on for two seconds. */
+  const nSpark = Math.round(24 * q);
+  const nJet = 4 + Math.floor(vrnd() * 3);
+  const jets = [];
+  for (let k = 0; k < nJet; k++) jets.push({ a: vrnd() * TAU, w: vrng(0.12, 0.6), n: vrng(0.3, 1.0) });
+  let jw = 0; for (const j of jets) jw += j.n;
+  for (let i = 0; i < nSpark; i++) {
+    // shrapnel leaves in jets of uneven strength: a blast has structure, it is
+    // not a sprinkler head
+    let pick = vrnd() * jw, jt = jets[0];
+    for (const j of jets) { pick -= j.n; if (pick <= 0) { jt = j; break; } }
+    const a = jt.a + vrng(-jt.w, jt.w);
+    const fast = vrnd() < 0.28;
+    const sp = fast ? vrng(1.0, 2.1) : vrng(0.18, 0.85);
     vfx.sparks.push({
-      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      r: R * (0.10 + vrnd() * 0.16), a: 1, t: 0, life: 0.5 + vrnd() * 1.4,
-      cr: 1.0 * heat, cg: (0.55 + 0.3 * vrnd()) * heat, cb: (0.18 + 0.25 * L[2]) * heat,
-      seed: vrnd(), kind: 'ember', drag: 1.1 + vrnd() * 1.4,
+      x: cx + Math.cos(a) * R * 0.3, y: cy + Math.sin(a) * R * 0.3,
+      vx: Math.cos(a) * sp + mvx * 0.5, vy: Math.sin(a) * sp + mvy * 0.5,
+      r: R * (fast ? vrng(0.030, 0.065) : vrng(0.045, 0.120)),
+      t: 0, life: fast ? vrng(0.28, 0.75) : vrng(0.6, 2.2),
+      temp: fast ? vrng(0.80, 1.0) : vrng(0.42, 0.95), drag: vrng(0.35, 1.1),
+      seed: vrnd(), flick: vrng(22, 58), a: 0, blur: vrng(0.6, 1.7),
     });
   }
 
-  /* the fireball, which cools into smoke */
-  for (let i = 0; i < 10; i++) {
-    const a = vrnd() * TAU, sp = 0.05 + vrnd() * 0.16;
-    vfx.puffs.push({
-      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      r: R * (0.5 + vrnd() * 0.5), r1: R * (2.4 + vrnd() * 2.2),
-      a: 0, t: 0, life: 0.55 + vrnd() * 0.5, seed: vrnd(),
-      cr: 1.0, cg: 0.42, cb: 0.12, hot: 1,
+  /* ---- the smoke that is not born of fire --------------------------------
+     Only the first breath of it: the bulk of the column arrives later, as the
+     fireball puffs burn out and hand themselves over. */
+  const nSmoke = Math.round(10 * q);
+  for (let i = 0; i < nSmoke; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.03, 0.16);
+    pushSmoke({
+      x: cx + Math.cos(a) * R * vrng(0.1, 0.8), y: cy + Math.sin(a) * R * vrng(0.1, 0.8),
+      vx: Math.cos(a) * sp + mvx * 0.35, vy: Math.sin(a) * sp + mvy * 0.35,
+      r: R * vrng(1.1, 1.9), r1: R * vrng(4.0, 7.0),
+      t: -vrng(0.06, 0.7), life: vrng(5.0, 11.0), warm: 1, peak: vrng(0.70, 1.0),
+      wx: wx, wy: wy,
     });
   }
 
-  /* the smoke column proper: slower, larger, long-lived */
-  for (let i = 0; i < 26; i++) {
-    const a = vrnd() * TAU, sp = 0.012 + vrnd() * 0.075;
-    vfx.puffs.push({
-      x: sh.x + Math.cos(a) * R * 0.5, y: sh.y + Math.sin(a) * R * 0.5,
-      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.012,
-      r: R * (0.35 + vrnd() * 0.55), r1: R * (2.2 + vrnd() * 3.4),
-      a: 0, t: -vrnd() * 0.55, life: 3.2 + vrnd() * 4.5, seed: vrnd(),
-      cr: 0.10, cg: 0.095, cb: 0.10, hot: 0,
+  /* ---- soot on the deck, and the smouldering-wreck bookkeeping ---------- */
+  for (let i = 0; i < 2; i++) {
+    vfx.fire.push({
+      x: cx + vrng(-1, 1) * R * 0.5, y: cy + vrng(-1, 1) * R * 0.5, vx: 0, vy: 0,
+      r: R * vrng(1.5, 2.9), r1: R * vrng(1.9, 3.4), t: 0, life: 26 + vrnd() * 8,
+      temp: 0, rot: vrnd() * TAU, spin: 0, seed: vrnd(), a: 0, kind: 1,
     });
   }
+  vfx.wrecks.push({ idx: sh.idx, x: cx, y: cy, t: 0, next: 0.10 });
+}
+
+/* Heat left in a wreck, 1 straight out of the fireball and gone by ~6 s. Kept
+   out here, keyed by ship index, because the debris itself is core state and
+   must not grow a cosmetic field. */
+const wreckAge = {};
+function wreckHeat(idx) {
+  const t = wreckAge[idx];
+  return t === undefined ? 0 : Math.exp(-t * 0.45) * (t < 0.15 ? t / 0.15 : 1);
 }
 
 function stepVfx(dt) {
-  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
-    const p = vfx.puffs[i];
+  const R = RULES.HULL_R;
+
+  /* ---- fireball ---------------------------------------------------------- */
+  for (let i = vfx.fire.length - 1; i >= 0; i--) {
+    const p = vfx.fire[i];
     p.t += dt;
-    if (p.t < 0) { p.a = 0; continue; }             // staggered ignition
+    if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
-    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    const drag = Math.pow(0.22, dt);
-    p.vx *= drag; p.vy *= drag;
-    p.r += (p.r1 - p.r) * (1 - Math.pow(0.35, dt));  // billow outward, slowing
-    if (p.hot) {
-      // the fireball cools from white through orange into soot
-      const k = 1 - u;
-      p.cr = 1.0 * k + 0.10 * u; p.cg = (0.30 + 0.55 * k * k) * k + 0.095 * u; p.cb = 0.10 * k + 0.10 * u;
-      p.a = Math.sin(Math.min(1, u * 3.2) * Math.PI * 0.5) * (1 - u) * 0.95;
-    } else {
-      p.a = Math.min(1, u * 5.0) * (1 - u) * (1 - u) * 0.5;
+    if (u >= 1) {
+      if (p.kind === 0 && p.r > RULES.HULL_R * 2.6) {
+        // it does not disappear, it becomes the smoke it turned into
+        pushSmoke({ x: p.x, y: p.y, vx: p.vx * 0.55, vy: p.vy * 0.55,
+                    r: p.r * 1.05, r1: Math.min(p.r * vrng(1.30, 2.00), RULES.HULL_R * 9.0),
+                    life: vrng(4.5, 9.5), warm: 0.30, peak: vrng(0.85, 1.0),
+                    wx: p.wx, wy: p.wy });
+      }
+      vfx.fire.splice(i, 1); continue;
     }
-  }
-  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
-    const p = vfx.sparks[i];
-    p.t += dt;
-    const u = p.t / p.life;
-    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
-    if (p.kind === 'flash') {
-      p.r = p.r0 + (p.r1 - p.r0) * u;                // an expanding shell
-      p.a = (1 - u) * (1 - u) * 2.4;
+    if (p.kind === 1) {                     // scorch: settles, then just sits
+      p.a = Math.min(1, p.t * 5.0) * (1 - smoothstep01(0.55, 1.0, u)) * 0.85;
+      p.r += (p.r1 - p.r) * (1 - Math.pow(0.5, dt));
       continue;
     }
     p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.12, dt);
+    p.vx *= drag; p.vy *= drag;
+    p.rot += p.spin * dt;
+    p.spin *= Math.pow(0.35, dt);
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.02, dt));   // it opens up fast, then stalls
+    // temperature: a brief hold at peak, then a steep cool into soot
+    p.T = p.temp * Math.pow(1 - u, 1.25) * (u < 0.08 ? 0.55 + u / 0.08 * 0.45 : 1);
+    p.a = Math.min(1, p.t * 26) * Math.pow(1 - u, 0.70);
+  }
+
+  /* ---- smoke ------------------------------------------------------------- */
+  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
+    const p = vfx.puffs[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.30, dt);
+    p.vx = p.vx*drag + p.wx*dt; p.vy = p.vy*drag + p.wy*dt;   // it drifts on the air
+    p.rot += p.spin * dt;
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.55, dt));
+    p.warm *= Math.pow(0.004, dt);            // the fire that lit it is going out
+    // thin as it expands: dense and opaque while it is young, a veil at the end
+    p.a = Math.min(1, p.t * 3.2) * Math.pow(1 - u, 0.75) * p.peak;
+    if (u > 0.5 && p.a < 0.035) { vfx.puffs.splice(i, 1); }   // invisible: stop paying for it
+  }
+
+  /* ---- flash, shock front, thrown light ---------------------------------- */
+  for (let i = vfx.glows.length - 1; i >= 0; i--) {
+    const p = vfx.glows[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.glows.splice(i, 1); continue; }
+    if (p.kind === 1) {                       // shock front: fast, then coasts
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 2.6));
+      p.a = p.amp * Math.pow(1 - u, 2.2) * Math.min(1, u * 14);
+    } else if (p.kind === 2) {                // light thrown into the air
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 2.0));
+      p.a = p.amp * Math.pow(1 - u, 2.6) * Math.min(1, u * 30);
+    } else {                                  // the core
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 1.7));
+      p.a = p.amp * Math.pow(1 - u, 2.4) * Math.min(1, u * 55);
+    }
+  }
+
+  /* ---- embers ------------------------------------------------------------ */
+  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
+    const p = vfx.sparks[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
     const drag = Math.pow(0.02, dt * p.drag);
     p.vx *= drag; p.vy *= drag;
-    p.a = (1 - u) * (1 - u) * (0.65 + 0.35 * Math.sin(p.t * 37 + p.seed * 20));  // ember flicker
+    p.T = p.temp * Math.pow(1 - u, 0.55);     // cools slowly, then falls off a cliff
+    // flicker: a hot fragment tumbling, showing you a bright face and a dark one
+    const fl = 0.62 + 0.38 * Math.sin(p.t * p.flick + p.seed * 31)
+                    * Math.sin(p.t * p.flick * 0.37 + p.seed * 11);
+    p.a = Math.pow(1 - u, 1.3) * fl;
   }
+
+  /* ---- smouldering wreckage ---------------------------------------------
+     The hottest two sections trail smoke while their torn edges still glow, so
+     the wreck stays connected to the event that made it. */
+  for (let i = vfx.wrecks.length - 1; i >= 0; i--) {
+    const w = vfx.wrecks[i];
+    w.t += dt;
+    wreckAge[w.idx] = w.t;
+    if (w.t > 10.0) { vfx.wrecks.splice(i, 1); continue; }
+    w.next -= dt;
+    if (w.t > 2.2) continue;                    // it stops smoking long before it cools
+    if (w.next > 0 || !G.state || !G.state.debris) continue;
+    w.next = 0.22;
+    const heat = wreckHeat(w.idx);
+    let hot = null, hot2 = null;
+    for (const d of G.state.debris) {
+      if (d.idx !== w.idx) continue;
+      if (!hot || d.burn > hot.burn) { hot2 = hot; hot = d; }
+      else if (!hot2 || d.burn > hot2.burn) { hot2 = d; }
+    }
+    for (const d of [hot, hot2]) {
+      if (!d) continue;
+      pushSmoke({
+        x: d.x + vrng(-1, 1) * R * 0.15, y: d.y + vrng(-1, 1) * R * 0.15,
+        vx: d.vx * 0.4 + vrng(-1, 1) * 0.02, vy: d.vy * 0.4 + vrng(-1, 1) * 0.02,
+        r: R * vrng(0.16, 0.30), r1: R * vrng(0.8, 1.6),
+        life: vrng(1.4, 3.0), warm: 0.06 * heat, peak: vrng(0.34, 0.58) * (0.4 + 0.6 * heat),
+      });
+      if (vrnd() < 0.35 * heat) {
+        const a = vrnd() * TAU, sp = vrng(0.02, 0.10);
+        vfx.sparks.push({ x: d.x, y: d.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          r: R * vrng(0.035, 0.07), t: 0, life: vrng(0.3, 0.9), temp: vrng(0.45, 0.75),
+          drag: vrng(1.2, 2.4), seed: vrnd(), flick: vrng(30, 70), a: 0 });
+      }
+    }
+  }
+}
+
+function smoothstep01(a, b, x) {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 /* ---------------------------------------------------------- damage feedback
@@ -4716,7 +5466,7 @@ function gameFrame(dt) {
   tickClock();
   if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
   stepVfx(dt);
-  if (vfx.puffs.length || vfx.sparks.length) dirty = true;   // keep the frame live
+  if (vfxLoad()) dirty = true;                               // keep the frame live
   stepFx(dt);
   drawGizmo();
 }

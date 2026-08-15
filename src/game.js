@@ -186,90 +186,316 @@ function addPreviewBeam() {
 /* ====================== destruction: explosion & smoke ====================
    Cosmetic only. The *trigger* is deterministic — a ship dies on the same
    substep on every peer — but the particles never enter the state hash or the
-   resync payload, so they can run at frame rate and vary harmlessly per client. */
-const vfx = { puffs: [], sparks: [] };
+   resync payload, so they can run at frame rate and vary harmlessly per client.
+
+   The sequence is authored as one event rather than four systems fired at once:
+
+     0.000  detonation. A white-hot core at ~35x display white, gone in 0.12 s,
+            with a shock front that outruns it and dissipates by 0.34 s.
+     0.02   the fireball erupts out of the flash, cooling white -> amber ->
+            orange -> deep red as it churns, and throws its light onto the
+            surrounding air for half a second.
+     0.10   secondary detonations inside the wreck, two or three of them, so the
+            event rolls instead of ending on one beat.
+     0.00   embers leave on ballistic arcs, motion-streaked, flickering, the
+            fastest gone in a third of a second and the slowest still burning
+            at two.
+     0.35+  every fireball puff, as it burns out, *becomes* a smoke puff at the
+            same place with the same momentum — the smoke is the fire, cooled,
+            not a separate cloud that happens to be there.
+     0.4-2  the hottest wreckage sections trail their own smoke while their torn
+            edges are still glowing.
+     6-30   a soot scorch and the last of the column, thinning.                */
+const vfx = { fire: [], puffs: [], sparks: [], glows: [], wrecks: [] };
 let vfxSeed = 1;
 function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
+function vrng(a, b) { return a + (b - a) * vrnd(); }
+/** Live particle count, so four wrecks on screen at once cost about what one
+    does: every group is scaled by the remaining budget when it spawns. */
+function vfxLoad() { return vfx.fire.length + vfx.puffs.length + vfx.sparks.length + vfx.glows.length; }
+
+/** A smoke puff. Also the retirement path for a burnt-out fireball puff. */
+function pushSmoke(o) {
+  vfx.puffs.push({
+    x: o.x, y: o.y, vx: o.vx, vy: o.vy,
+    r: o.r, r1: o.r1, t: o.t || 0, life: o.life,
+    rot: vrnd() * TAU, spin: vrng(-0.5, 0.5), seed: vrnd(),
+    warm: o.warm || 0, wx: o.wx || 0, wy: o.wy || 0,
+    // how deep in the cloud this puff sits: the interior ones stay dark
+    shade: vrng(0.30, 1.05),
+    a: 0, peak: o.peak !== undefined ? o.peak : 0.85,
+  });
+}
 
 function spawnDestruction(sh) {
-  const L = LIVERY[sh.idx % LIVERY.length];
   const R = RULES.HULL_R;
+  const cx = sh.x, cy = sh.y;
+  // the wreck keeps the ship's momentum: the fireball and the smoke are dragged
+  // downrange, which is most of what makes a kill read as a kill in motion
+  const mvx = Math.cos(sh.heading) * sh.speed, mvy = Math.sin(sh.heading) * sh.speed;
+  const q = clamp(1 - vfxLoad() / 1100, 0.4, 1);          // shared budget
+  // one drift for the whole wreck, so its column leans instead of sitting
+  const wa = vrnd() * TAU, ws = vrng(0.010, 0.030);
+  const wx = Math.cos(wa) * ws + mvx * 0.10, wy = Math.sin(wa) * ws + mvy * 0.10;
 
-  /* the flash: brief, white-hot, and large enough to bloom */
-  vfx.sparks.push({ x: sh.x, y: sh.y, r: R * 3.2, a: 1, t: 0, life: 0.16,
-                    cr: 1, cg: 0.95, cb: 0.85, seed: vrnd(), kind: 'flash', r0: R * 3.2, r1: R * 7.5 });
+  /* ---- the detonation itself ---------------------------------------------
+     Three overlapping lights: the core (blown out, over in 0.12 s), the shock
+     front (outruns it, thin, cold-white), and the light the event throws into
+     the air around it, which is what stops the flash reading as a decal. */
+  vfx.glows.push({ kind: 0, x: cx, y: cy, r: R * 0.85, r0: R * 0.85, r1: R * 3.1, t: 0, life: 0.115,
+                   amp: 9.0, a: 0, cr: 1.0, cg: 0.94, cb: 0.84, seed: vrnd() });
+  // the ignition itself, bridging the flash into the fireball
+  vfx.glows.push({ kind: 0, x: cx, y: cy, r: R * 1.8, r0: R * 1.8, r1: R * 5.0, t: 0, life: 0.26,
+                   amp: 1.2, a: 0, cr: 1.0, cg: 0.62, cb: 0.26, seed: vrnd() });
+  vfx.glows.push({ kind: 1, x: cx, y: cy, r: R * 1.6, r0: R * 1.6, r1: R * 5.0, t: 0, life: 0.07,
+                   amp: 0.25, a: 0, cr: 1.0, cg: 0.90, cb: 0.80, seed: vrnd() });
+  vfx.glows.push({ kind: 2, x: cx, y: cy, r: R * 3.0, r0: R * 3.0, r1: R * 8.5, t: 0, life: 0.40,
+                   amp: 0.13, a: 0, cr: 1.0, cg: 0.42, cb: 0.11, seed: vrnd() });
 
-  /* embers: hot, fast, short-lived, tinted by the livery they came off */
-  for (let i = 0; i < 34; i++) {
-    const a = vrnd() * TAU, sp = (0.12 + vrnd() * 0.55);
-    const heat = 0.55 + vrnd() * 0.45;
+  /* ---- the fireball -------------------------------------------------------
+     Two scales, because one is never enough: a few big slow masses that
+     overlap into a single body, and a ring of small fast ones that tear off
+     the front of it and burn out first. */
+  const nBig = Math.round(7 * q), nSmall = Math.round(9 * q);
+  for (let i = 0; i < nBig; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.03, 0.20);
+    vfx.fire.push({
+      x: cx + Math.cos(a) * R * vrng(0, 0.30), y: cy + Math.sin(a) * R * vrng(0, 0.30),
+      vx: Math.cos(a) * sp + mvx * 0.55, vy: Math.sin(a) * sp + mvy * 0.55,
+      r: R * vrng(1.10, 1.90), r1: R * vrng(6.0, 9.0),
+      t: -vrng(0, 0.035), life: vrng(0.70, 1.25),
+      temp: vrng(0.94, 1.0), rot: vrnd() * TAU, spin: vrng(-1.4, 1.4),
+      seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+    });
+  }
+  for (let i = 0; i < nSmall; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.14, 0.44);
+    vfx.fire.push({
+      x: cx + Math.cos(a) * R * vrng(0.2, 0.9), y: cy + Math.sin(a) * R * vrng(0.2, 0.9),
+      vx: Math.cos(a) * sp + mvx * 0.6, vy: Math.sin(a) * sp + mvy * 0.6,
+      r: R * vrng(0.65, 1.20), r1: R * vrng(2.6, 4.4),
+      t: -vrng(0, 0.06), life: vrng(0.26, 0.55),
+      temp: vrng(0.52, 0.86), rot: vrnd() * TAU, spin: vrng(-2.6, 2.6),
+      seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+    });
+  }
+
+  /* ---- secondaries: the wreck goes up in stages ------------------------- */
+  const nSec = 2 + (vrnd() < 0.55 ? 1 : 0);
+  for (let k = 0; k < nSec; k++) {
+    const d = vrng(0.10, 0.40), a = vrnd() * TAU, rr = R * vrng(0.4, 1.2);
+    const sx = cx + Math.cos(a) * rr + mvx * d, sy = cy + Math.sin(a) * rr + mvy * d;
+    vfx.glows.push({ kind: 0, x: sx, y: sy, r: R * 0.9, r0: R * 0.9, r1: R * 3.4, t: -d, life: 0.13,
+                     amp: 2.6, a: 0, cr: 1.0, cg: 0.68, cb: 0.30, seed: vrnd() });
+    const n = Math.round(4 * q);
+    for (let i = 0; i < n; i++) {
+      const b = vrnd() * TAU, sp = vrng(0.06, 0.30);
+      vfx.fire.push({
+        x: sx, y: sy, vx: Math.cos(b) * sp + mvx * 0.4, vy: Math.sin(b) * sp + mvy * 0.4,
+        r: R * vrng(0.40, 0.75), r1: R * vrng(1.8, 3.2),
+        t: -d - vrng(0, 0.04), life: vrng(0.34, 0.70),
+        temp: vrng(0.80, 0.95), rot: vrnd() * TAU, spin: vrng(-2.6, 2.6),
+        seed: vrnd(), a: 0, kind: 0, wx: wx, wy: wy,
+      });
+    }
+    for (let i = 0; i < Math.round(5 * q); i++) {
+      const b = vrnd() * TAU, sp = vrng(0.25, 1.0);
+      vfx.sparks.push({ x: sx, y: sy, vx: Math.cos(b) * sp, vy: Math.sin(b) * sp,
+        r: R * vrng(0.045, 0.10), t: -d, life: vrng(0.25, 1.1), temp: vrng(0.7, 1.0),
+        drag: vrng(0.5, 1.4), seed: vrnd(), flick: vrng(26, 60), a: 0 });
+    }
+  }
+
+  /* ---- embers ------------------------------------------------------------
+     A wide speed spread is what sells shrapnel: a few outrun everything and
+     die immediately, the slow ones tumble and glow on for two seconds. */
+  const nSpark = Math.round(24 * q);
+  const nJet = 4 + Math.floor(vrnd() * 3);
+  const jets = [];
+  for (let k = 0; k < nJet; k++) jets.push({ a: vrnd() * TAU, w: vrng(0.12, 0.6), n: vrng(0.3, 1.0) });
+  let jw = 0; for (const j of jets) jw += j.n;
+  for (let i = 0; i < nSpark; i++) {
+    // shrapnel leaves in jets of uneven strength: a blast has structure, it is
+    // not a sprinkler head
+    let pick = vrnd() * jw, jt = jets[0];
+    for (const j of jets) { pick -= j.n; if (pick <= 0) { jt = j; break; } }
+    const a = jt.a + vrng(-jt.w, jt.w);
+    const fast = vrnd() < 0.28;
+    const sp = fast ? vrng(1.0, 2.1) : vrng(0.18, 0.85);
     vfx.sparks.push({
-      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      r: R * (0.10 + vrnd() * 0.16), a: 1, t: 0, life: 0.5 + vrnd() * 1.4,
-      cr: 1.0 * heat, cg: (0.55 + 0.3 * vrnd()) * heat, cb: (0.18 + 0.25 * L[2]) * heat,
-      seed: vrnd(), kind: 'ember', drag: 1.1 + vrnd() * 1.4,
+      x: cx + Math.cos(a) * R * 0.3, y: cy + Math.sin(a) * R * 0.3,
+      vx: Math.cos(a) * sp + mvx * 0.5, vy: Math.sin(a) * sp + mvy * 0.5,
+      r: R * (fast ? vrng(0.030, 0.065) : vrng(0.045, 0.120)),
+      t: 0, life: fast ? vrng(0.28, 0.75) : vrng(0.6, 2.2),
+      temp: fast ? vrng(0.80, 1.0) : vrng(0.42, 0.95), drag: vrng(0.35, 1.1),
+      seed: vrnd(), flick: vrng(22, 58), a: 0, blur: vrng(0.6, 1.7),
     });
   }
 
-  /* the fireball, which cools into smoke */
-  for (let i = 0; i < 10; i++) {
-    const a = vrnd() * TAU, sp = 0.05 + vrnd() * 0.16;
-    vfx.puffs.push({
-      x: sh.x, y: sh.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-      r: R * (0.5 + vrnd() * 0.5), r1: R * (2.4 + vrnd() * 2.2),
-      a: 0, t: 0, life: 0.55 + vrnd() * 0.5, seed: vrnd(),
-      cr: 1.0, cg: 0.42, cb: 0.12, hot: 1,
+  /* ---- the smoke that is not born of fire --------------------------------
+     Only the first breath of it: the bulk of the column arrives later, as the
+     fireball puffs burn out and hand themselves over. */
+  const nSmoke = Math.round(10 * q);
+  for (let i = 0; i < nSmoke; i++) {
+    const a = vrnd() * TAU, sp = vrng(0.03, 0.16);
+    pushSmoke({
+      x: cx + Math.cos(a) * R * vrng(0.1, 0.8), y: cy + Math.sin(a) * R * vrng(0.1, 0.8),
+      vx: Math.cos(a) * sp + mvx * 0.35, vy: Math.sin(a) * sp + mvy * 0.35,
+      r: R * vrng(1.1, 1.9), r1: R * vrng(4.0, 7.0),
+      t: -vrng(0.06, 0.7), life: vrng(5.0, 11.0), warm: 1, peak: vrng(0.70, 1.0),
+      wx: wx, wy: wy,
     });
   }
 
-  /* the smoke column proper: slower, larger, long-lived */
-  for (let i = 0; i < 26; i++) {
-    const a = vrnd() * TAU, sp = 0.012 + vrnd() * 0.075;
-    vfx.puffs.push({
-      x: sh.x + Math.cos(a) * R * 0.5, y: sh.y + Math.sin(a) * R * 0.5,
-      vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 0.012,
-      r: R * (0.35 + vrnd() * 0.55), r1: R * (2.2 + vrnd() * 3.4),
-      a: 0, t: -vrnd() * 0.55, life: 3.2 + vrnd() * 4.5, seed: vrnd(),
-      cr: 0.10, cg: 0.095, cb: 0.10, hot: 0,
+  /* ---- soot on the deck, and the smouldering-wreck bookkeeping ---------- */
+  for (let i = 0; i < 2; i++) {
+    vfx.fire.push({
+      x: cx + vrng(-1, 1) * R * 0.5, y: cy + vrng(-1, 1) * R * 0.5, vx: 0, vy: 0,
+      r: R * vrng(1.5, 2.9), r1: R * vrng(1.9, 3.4), t: 0, life: 26 + vrnd() * 8,
+      temp: 0, rot: vrnd() * TAU, spin: 0, seed: vrnd(), a: 0, kind: 1,
     });
   }
+  vfx.wrecks.push({ idx: sh.idx, x: cx, y: cy, t: 0, next: 0.10 });
+}
+
+/* Heat left in a wreck, 1 straight out of the fireball and gone by ~6 s. Kept
+   out here, keyed by ship index, because the debris itself is core state and
+   must not grow a cosmetic field. */
+const wreckAge = {};
+function wreckHeat(idx) {
+  const t = wreckAge[idx];
+  return t === undefined ? 0 : Math.exp(-t * 0.45) * (t < 0.15 ? t / 0.15 : 1);
 }
 
 function stepVfx(dt) {
-  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
-    const p = vfx.puffs[i];
+  const R = RULES.HULL_R;
+
+  /* ---- fireball ---------------------------------------------------------- */
+  for (let i = vfx.fire.length - 1; i >= 0; i--) {
+    const p = vfx.fire[i];
     p.t += dt;
-    if (p.t < 0) { p.a = 0; continue; }             // staggered ignition
+    if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
-    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
-    p.x += p.vx * dt; p.y += p.vy * dt;
-    const drag = Math.pow(0.22, dt);
-    p.vx *= drag; p.vy *= drag;
-    p.r += (p.r1 - p.r) * (1 - Math.pow(0.35, dt));  // billow outward, slowing
-    if (p.hot) {
-      // the fireball cools from white through orange into soot
-      const k = 1 - u;
-      p.cr = 1.0 * k + 0.10 * u; p.cg = (0.30 + 0.55 * k * k) * k + 0.095 * u; p.cb = 0.10 * k + 0.10 * u;
-      p.a = Math.sin(Math.min(1, u * 3.2) * Math.PI * 0.5) * (1 - u) * 0.95;
-    } else {
-      p.a = Math.min(1, u * 5.0) * (1 - u) * (1 - u) * 0.5;
+    if (u >= 1) {
+      if (p.kind === 0 && p.r > RULES.HULL_R * 2.6) {
+        // it does not disappear, it becomes the smoke it turned into
+        pushSmoke({ x: p.x, y: p.y, vx: p.vx * 0.55, vy: p.vy * 0.55,
+                    r: p.r * 1.05, r1: Math.min(p.r * vrng(1.30, 2.00), RULES.HULL_R * 9.0),
+                    life: vrng(4.5, 9.5), warm: 0.30, peak: vrng(0.85, 1.0),
+                    wx: p.wx, wy: p.wy });
+      }
+      vfx.fire.splice(i, 1); continue;
     }
-  }
-  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
-    const p = vfx.sparks[i];
-    p.t += dt;
-    const u = p.t / p.life;
-    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
-    if (p.kind === 'flash') {
-      p.r = p.r0 + (p.r1 - p.r0) * u;                // an expanding shell
-      p.a = (1 - u) * (1 - u) * 2.4;
+    if (p.kind === 1) {                     // scorch: settles, then just sits
+      p.a = Math.min(1, p.t * 5.0) * (1 - smoothstep01(0.55, 1.0, u)) * 0.85;
+      p.r += (p.r1 - p.r) * (1 - Math.pow(0.5, dt));
       continue;
     }
     p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.12, dt);
+    p.vx *= drag; p.vy *= drag;
+    p.rot += p.spin * dt;
+    p.spin *= Math.pow(0.35, dt);
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.02, dt));   // it opens up fast, then stalls
+    // temperature: a brief hold at peak, then a steep cool into soot
+    p.T = p.temp * Math.pow(1 - u, 1.25) * (u < 0.08 ? 0.55 + u / 0.08 * 0.45 : 1);
+    p.a = Math.min(1, p.t * 26) * Math.pow(1 - u, 0.70);
+  }
+
+  /* ---- smoke ------------------------------------------------------------- */
+  for (let i = vfx.puffs.length - 1; i >= 0; i--) {
+    const p = vfx.puffs[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.puffs.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const drag = Math.pow(0.30, dt);
+    p.vx = p.vx*drag + p.wx*dt; p.vy = p.vy*drag + p.wy*dt;   // it drifts on the air
+    p.rot += p.spin * dt;
+    p.r += (p.r1 - p.r) * (1 - Math.pow(0.55, dt));
+    p.warm *= Math.pow(0.004, dt);            // the fire that lit it is going out
+    // thin as it expands: dense and opaque while it is young, a veil at the end
+    p.a = Math.min(1, p.t * 3.2) * Math.pow(1 - u, 0.75) * p.peak;
+    if (u > 0.5 && p.a < 0.035) { vfx.puffs.splice(i, 1); }   // invisible: stop paying for it
+  }
+
+  /* ---- flash, shock front, thrown light ---------------------------------- */
+  for (let i = vfx.glows.length - 1; i >= 0; i--) {
+    const p = vfx.glows[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.glows.splice(i, 1); continue; }
+    if (p.kind === 1) {                       // shock front: fast, then coasts
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 2.6));
+      p.a = p.amp * Math.pow(1 - u, 2.2) * Math.min(1, u * 14);
+    } else if (p.kind === 2) {                // light thrown into the air
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 2.0));
+      p.a = p.amp * Math.pow(1 - u, 2.6) * Math.min(1, u * 30);
+    } else {                                  // the core
+      p.r = p.r0 + (p.r1 - p.r0) * (1 - Math.pow(1 - u, 1.7));
+      p.a = p.amp * Math.pow(1 - u, 2.4) * Math.min(1, u * 55);
+    }
+  }
+
+  /* ---- embers ------------------------------------------------------------ */
+  for (let i = vfx.sparks.length - 1; i >= 0; i--) {
+    const p = vfx.sparks[i];
+    p.t += dt;
+    if (p.t < 0) { p.a = 0; continue; }
+    const u = p.t / p.life;
+    if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
+    p.x += p.vx * dt; p.y += p.vy * dt;
     const drag = Math.pow(0.02, dt * p.drag);
     p.vx *= drag; p.vy *= drag;
-    p.a = (1 - u) * (1 - u) * (0.65 + 0.35 * Math.sin(p.t * 37 + p.seed * 20));  // ember flicker
+    p.T = p.temp * Math.pow(1 - u, 0.55);     // cools slowly, then falls off a cliff
+    // flicker: a hot fragment tumbling, showing you a bright face and a dark one
+    const fl = 0.62 + 0.38 * Math.sin(p.t * p.flick + p.seed * 31)
+                    * Math.sin(p.t * p.flick * 0.37 + p.seed * 11);
+    p.a = Math.pow(1 - u, 1.3) * fl;
   }
+
+  /* ---- smouldering wreckage ---------------------------------------------
+     The hottest two sections trail smoke while their torn edges still glow, so
+     the wreck stays connected to the event that made it. */
+  for (let i = vfx.wrecks.length - 1; i >= 0; i--) {
+    const w = vfx.wrecks[i];
+    w.t += dt;
+    wreckAge[w.idx] = w.t;
+    if (w.t > 10.0) { vfx.wrecks.splice(i, 1); continue; }
+    w.next -= dt;
+    if (w.t > 2.2) continue;                    // it stops smoking long before it cools
+    if (w.next > 0 || !G.state || !G.state.debris) continue;
+    w.next = 0.22;
+    const heat = wreckHeat(w.idx);
+    let hot = null, hot2 = null;
+    for (const d of G.state.debris) {
+      if (d.idx !== w.idx) continue;
+      if (!hot || d.burn > hot.burn) { hot2 = hot; hot = d; }
+      else if (!hot2 || d.burn > hot2.burn) { hot2 = d; }
+    }
+    for (const d of [hot, hot2]) {
+      if (!d) continue;
+      pushSmoke({
+        x: d.x + vrng(-1, 1) * R * 0.15, y: d.y + vrng(-1, 1) * R * 0.15,
+        vx: d.vx * 0.4 + vrng(-1, 1) * 0.02, vy: d.vy * 0.4 + vrng(-1, 1) * 0.02,
+        r: R * vrng(0.16, 0.30), r1: R * vrng(0.8, 1.6),
+        life: vrng(1.4, 3.0), warm: 0.06 * heat, peak: vrng(0.34, 0.58) * (0.4 + 0.6 * heat),
+      });
+      if (vrnd() < 0.35 * heat) {
+        const a = vrnd() * TAU, sp = vrng(0.02, 0.10);
+        vfx.sparks.push({ x: d.x, y: d.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+          r: R * vrng(0.035, 0.07), t: 0, life: vrng(0.3, 0.9), temp: vrng(0.45, 0.75),
+          drag: vrng(1.2, 2.4), seed: vrnd(), flick: vrng(30, 70), a: 0 });
+      }
+    }
+  }
+}
+
+function smoothstep01(a, b, x) {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
 }
 
 /* ---------------------------------------------------------- damage feedback
@@ -891,7 +1117,7 @@ function gameFrame(dt) {
   tickClock();
   if (G.phase === 'resolve' && G.ctx) stepResolve(dt);
   stepVfx(dt);
-  if (vfx.puffs.length || vfx.sparks.length) dirty = true;   // keep the frame live
+  if (vfxLoad()) dirty = true;                               // keep the frame live
   stepFx(dt);
   drawGizmo();
 }
