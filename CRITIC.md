@@ -6,7 +6,7 @@ is not yet AAA and say so plainly. A vague compliment is a failed review.
 
 ## Ground truth
 
-- `/home/max/Code/lazer/reference.png` — the visual target. **Read it.**
+- `reference.png` — the visual target, kept locally and not redistributed.
 - Render the current build yourself, don't trust an old screenshot:
   ```
   cd /home/max/Code/lazer

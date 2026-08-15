@@ -4,3 +4,7 @@ shots/
 regions/
 node_modules/
 *.log
+
+# The reference plate is a screenshot of unknown provenance — kept locally,
+# not redistributed. Nothing at runtime needs it.
+reference.png

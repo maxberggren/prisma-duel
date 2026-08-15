@@ -6,7 +6,7 @@ indistinguishable-from-a-render quality. AAA or it doesn't ship.
 
 ## The reference
 
-**Read `/home/max/Code/lazer/reference.png` with the Read tool before doing anything.**
+**Read `reference.png` (kept locally; not in the repo) before doing anything.**
 It is the visual target. What it shows:
 
 - A near-black charcoal gallery wall, very slightly blue, lit by a soft broad key from
