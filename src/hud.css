@@ -140,11 +140,15 @@
   .btn.fire{margin-top:4px}
   .btn.fire[aria-pressed="true"]{background:rgba(255,107,129,.18);border-color:rgba(255,107,129,.6);color:#ffd9df}
   /* The one action worth taking, marked by weight rather than by colour. */
+  /* The play button measured L*17 -- the darkest control on a dark card, which
+     reads as disabled. One flat fill, lifted, in a blue taken from the arena's
+     own wall sheen. No gradient, no glow. */
   .btn.primary, .btn.commit{
-    color:#e6f5ff;
-    background:rgba(127,216,255,.15);
-    border-color:rgba(127,216,255,.40);
+    color:#eaf7ff;
+    background:rgba(34,96,138,.72);
+    border-color:rgba(127,216,255,.52);
   }
+  .btn.primary:hover, .btn.commit:hover{background:rgba(44,120,170,.86)}
   .btn.primary:hover, .btn.commit:hover{
     background:rgba(127,216,255,.24);border-color:rgba(127,216,255,.60);color:#fff}
   .btn.commit{margin-top:9px}
@@ -172,8 +176,8 @@
         --vx:50%;
         background:
           radial-gradient(52% 64% at var(--vx) 50%,
-            rgba(3,4,8,.86) 0%, rgba(3,4,8,.74) 34%,
-            rgba(3,4,8,.34) 62%, rgba(3,4,8,.08) 82%, rgba(3,4,8,0) 100%),
+            rgba(3,4,8,.62) 0%, rgba(3,4,8,.52) 34%,
+            rgba(3,4,8,.22) 62%, rgba(3,4,8,.04) 78%, rgba(3,4,8,0) 100%),
           linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
                           rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
 
@@ -294,8 +298,8 @@
           padding:0 0 calc(var(--pad) + env(safe-area-inset-bottom));
           background:
             radial-gradient(120% 52% at 50% 108%,
-              rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
-              rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
+              rgba(3,4,8,.80) 0%, rgba(3,4,8,.66) 42%,
+              rgba(3,4,8,.24) 74%, rgba(3,4,8,0) 100%),
             linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
     .modal{width:calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right));
            padding:18px;max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));

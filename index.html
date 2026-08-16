@@ -148,11 +148,15 @@
   .btn.fire{margin-top:4px}
   .btn.fire[aria-pressed="true"]{background:rgba(255,107,129,.18);border-color:rgba(255,107,129,.6);color:#ffd9df}
   /* The one action worth taking, marked by weight rather than by colour. */
+  /* The play button measured L*17 -- the darkest control on a dark card, which
+     reads as disabled. One flat fill, lifted, in a blue taken from the arena's
+     own wall sheen. No gradient, no glow. */
   .btn.primary, .btn.commit{
-    color:#e6f5ff;
-    background:rgba(127,216,255,.15);
-    border-color:rgba(127,216,255,.40);
+    color:#eaf7ff;
+    background:rgba(34,96,138,.72);
+    border-color:rgba(127,216,255,.52);
   }
+  .btn.primary:hover, .btn.commit:hover{background:rgba(44,120,170,.86)}
   .btn.primary:hover, .btn.commit:hover{
     background:rgba(127,216,255,.24);border-color:rgba(127,216,255,.60);color:#fff}
   .btn.commit{margin-top:9px}
@@ -180,8 +184,8 @@
         --vx:50%;
         background:
           radial-gradient(52% 64% at var(--vx) 50%,
-            rgba(3,4,8,.86) 0%, rgba(3,4,8,.74) 34%,
-            rgba(3,4,8,.34) 62%, rgba(3,4,8,.08) 82%, rgba(3,4,8,0) 100%),
+            rgba(3,4,8,.62) 0%, rgba(3,4,8,.52) 34%,
+            rgba(3,4,8,.22) 62%, rgba(3,4,8,.04) 78%, rgba(3,4,8,0) 100%),
           linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
                           rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
 
@@ -302,8 +306,8 @@
           padding:0 0 calc(var(--pad) + env(safe-area-inset-bottom));
           background:
             radial-gradient(120% 52% at 50% 108%,
-              rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
-              rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
+              rgba(3,4,8,.80) 0%, rgba(3,4,8,.66) 42%,
+              rgba(3,4,8,.24) 74%, rgba(3,4,8,0) 100%),
             linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
     .modal{width:calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right));
            padding:18px;max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));
@@ -1302,6 +1306,9 @@ const DISPLAY_RAYS = 96;
    Rays are now spread across the waist, so the damage a ship takes is
    proportional to how much of the beam cross-section it actually blocks. */
 const BEAM_WAIST = 0.0101;
+/* How hard the drawn beam burns. The tracer's power is physical and unchanged;
+   this is the exposure of the line that carries it. */
+const BEAM_GAIN = 4.5;
 /* Visual divergence only. A beam widens and dims per unit length as it travels,
    which is what the renderer draws — but it does NOT reduce damage with range,
    and that is correct rather than an oversight: the waist stays far narrower
@@ -2507,6 +2514,17 @@ void main(){
             + vec3(0.05710, 0.05970, 0.06910) * wrp
             + vec3(0.01300, 0.00670, 0.00140);
 
+  /* The plate rotates as it falls away from the key rather than merely getting
+     darker. Every term above is cool, so the whole tonal range was one
+     blue-grey ramp desaturating into grey and the room had no volume. Driving
+     the warmth off darkness -- rather than warming the bounce term, which
+     reaches the lit areas too and turned the whole floor brown -- leaves the
+     key exactly as it was and only rotates the falloff. */
+  {
+    float lit = clamp(key * 1.7 + wrp * 0.85, 0.0, 1.0);
+    wall *= mix(vec3(1.34, 1.02, 0.76), vec3(1.0), lit);
+  }
+
   // --- long, very smooth roll-off into the corners of the room
   float rr = length(vec2((sv.x - 0.476)*aspect, sv.y - 0.521)) * 0.750;
   wall *= 1.0 - 0.768*smoothstep(0.399, 1.067, rr);
@@ -2647,6 +2665,7 @@ out vec4 fragColor;
 uniform float uCore;      // core sigma (world)
 uniform float uRefPower;  // power of an unattenuated root ray
 uniform float uHalo;      // halo scale (world)
+uniform float uGain;      // radiance multiplier -- see uBeamGain in the host
 
 void main(){
   /* --- exact screen footprint of the local beam frame -----------------------
@@ -2718,7 +2737,13 @@ void main(){
   float wht = smoothstep(0.10, 0.85, core*pw/max(uRefPower,1e-9));
   vec3  cc  = mix(spec, vec3(1.0), wht*0.92);
 
-  vec3 outc = (cc*core + spec*wing) * pw * cap;
+  /* Radiance, not width. Measured on a shipped frame, nothing in the picture
+     clipped: the beam peaked around a third of white, so the bloom and streak
+     passes downstream were handed a line with no energy in it and a laser read
+     as a hairline drawn with a technical pen. The gain lets the core saturate
+     and blow out through the bloom while the drawn profile -- which is
+     flux-conserved and deliberately razor thin -- is left exactly as it was. */
+  vec3 outc = (cc*core + spec*wing) * pw * cap * uGain;
   fragColor = vec4(max(outc, 0.0), 1.0);
 }`;
 
@@ -2880,7 +2905,11 @@ void main(){
   float r2 = dot(da,da) / 1.0400;          // 0 centre, ~1 at the corners (16:9)
 
   /* --- transverse chromatic aberration, zero on axis, grows with field --- */
-  float ca = 0.0022*r2*r2 + 0.0008*r2;
+  /* Transverse CA, kept well under the tracer's own colour. At full strength
+     the corner fringe on every beam was brighter and more saturated than the
+     dispersion the ray tracer computes -- a stock lens filter outshining the
+     physics, in a game about splitting light. */
+  float ca = 0.0008*r2*r2 + 0.0004*r2;
   vec3 sc, bl;
   sc.r = texture(uScene, uv - d*ca).r;
   sc.g = texture(uScene, uv).g;
@@ -3861,6 +3890,7 @@ function render(dt) {
   gl.uniform1f(pBeam.u.uDiv, BEAM_DIV);
   gl.uniform1f(pBeam.u.uCore, wBase * 0.62);
   gl.uniform1f(pBeam.u.uHalo, wBase * 3.0);
+  gl.uniform1f(pBeam.u.uGain, BEAM_GAIN);
   gl.bindVertexArray(vaoBeam);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, segCount);
 
@@ -5359,13 +5389,23 @@ function wreckHeat(idx) {
   return t === undefined ? 0 : Math.exp(-t * 0.45) * (t < 0.15 ? t / 0.15 : 1);
 }
 
+/* Fire, sparks and impact glows run on their own clock. On the attract screen
+   the simulation is slowed about eighteenfold, and stepping the VFX with it
+   stretched an authored half-second fireball across nine real seconds: the
+   staged kill fired exactly on cue and then was not visible for another three
+   seconds, peaking at ten. Heat now runs near real time while the ships stay
+   in slow motion -- which is a deliberate register, and it leaves the smoke on
+   the slow clock so it still lingers for turns rather than for seconds. */
+let vfxHeat = 1;
+
 function stepVfx(dt) {
   const R = RULES.HULL_R;
+  const hd = dt * vfxHeat;          // fire, glows and sparks; smoke keeps `dt`
 
   /* ---- fireball ---------------------------------------------------------- */
   for (let i = vfx.fire.length - 1; i >= 0; i--) {
     const p = vfx.fire[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) {
@@ -5415,7 +5455,7 @@ function stepVfx(dt) {
   /* ---- flash, shock front, thrown light ---------------------------------- */
   for (let i = vfx.glows.length - 1; i >= 0; i--) {
     const p = vfx.glows[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) { vfx.glows.splice(i, 1); continue; }
@@ -5434,7 +5474,7 @@ function stepVfx(dt) {
   /* ---- embers ------------------------------------------------------------ */
   for (let i = vfx.sparks.length - 1; i >= 0; i--) {
     const p = vfx.sparks[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
@@ -6252,7 +6292,7 @@ const ATT = {
   zoomMin: 1.55, zoomMax: 2.6,  // close enough to read a hull, wide enough to hold a duel
   minR: 0.30,          // never push closer than this, however tight the action
   maxR: 0.80,          // and never pull back further than this: crop the long shot
-  fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
+  fanReach: 2.3,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
   boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.72,   // hold on a kill this long
@@ -6268,7 +6308,8 @@ const ATT = {
   castGood: 22.0,      // score at which we stop looking
   crowdMaxR: 0.80,     // and how far back the camera may go to hold them
   watchR: 0.74,        // how tight to sit on the ship that is about to go
-  leadIn: 3.2,         // seconds of firefight before the kill lands
+  leadIn: 2.4,         // seconds of firefight before the kill lands
+  heatScale: 0.65,     // fireballs play at about two-thirds of real time
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
   staging: false,
@@ -6282,8 +6323,9 @@ const ATT = {
   subjId: '',
   fps: 24,             // the demo's own frame rate (see attractFrame)
   acc: 0,
-  wGlass: 190, wGlassFirst: 40, wHit: 10,   // a demo pilot values glass over damage
-  wSpread: 55,         // ...and values a wide fan most of all
+  wGlass: 90, wGlassFirst: 40, wHit: 10,    // a demo pilot values glass over damage
+  wSpread: 190,        // ...and values a wide fan most of all
+  wThrow: 26, throwIdeal: 2.6,   // ...with a long free run for it to open into
   pan: 0.22,           // a little slack past the walls, not enough to read as letterboxing
   camT: 0, overT: 0, seed: 20260816,
 };
@@ -6319,6 +6361,16 @@ function attractShotScore(sh, heading, x, y) {
        So aim off-axis, and not so far off-axis that the glass turns mirror. */
     const inc = Math.acos(clamp(Math.abs(dx * first.nx + dy * first.ny), 0, 1));
     score += ATT.wSpread * Math.sin(inc) * (inc > 1.31 ? 0.3 : 1);
+
+    /* And room for the fan to open. Entering glass is not the same thing as
+       producing a fan anyone can see: the colours leave the far face at
+       slightly different angles and need a long free run before that becomes a
+       spread rather than a fringe. Measured on the shipped screen, the one
+       real fan in the opening was eight pixels wide -- it had nowhere to go. */
+    let t = first.t + 0.02;
+    while (t < 4 && prismAt(x + dx * t, y + dy * t) >= 0) t += 0.03;   // out the far side
+    const beyond = sceneHit(x + dx * (t + 0.01), y + dy * (t + 0.01), dx, dy, sh.idx);
+    score += Math.min(beyond ? beyond.t : 3, ATT.throwIdeal) * ATT.wThrow;
   }
   return score;
 }
@@ -6541,6 +6593,15 @@ function attractStage() {
     attractSeedArena(best.seed);                  // rebuild the winner and play to its cue
     for (let i = 0, n = Math.max(0, best.frames - lead); i < n; i++) attractFrame(FR);
     ATT.watch = best.victim;                      // the camera knows who it is here for
+
+    /* Wipe what the pre-roll left behind. Playing forward to the cue can pass
+       through an earlier kill, and the viewer then arrives to find its soot
+       smear and eight unlit shards sitting in the opening frame -- the
+       leftovers of a death they never saw. The field they arrive on is clean;
+       everything they see burn, they saw die. */
+    G.state.debris.length = 0;
+    vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+    vfx.glows.length = vfx.wrecks.length = 0;
   }
   ATT.staging = false;
 
@@ -6822,7 +6883,11 @@ function attractFrame(dt) {
   if (G.phase === 'resolve' && G.ctx) {
     const before = G.state.ships.map(sh => sh.alive);
     stepResolve(sdt);
-    stepVfx(sdt);           // fire and smoke run on the same slowed clock
+    /* Smoke on the sim clock so it still lingers for turns; heat on its own,
+       so a detonation ignites and peaks while you are looking at it. */
+    vfxHeat = ATT.heatScale / Math.max(1e-6, ATT.scale);
+    stepVfx(sdt);
+    vfxHeat = 1;
     attractInterp();
     for (let i = 0; i < G.state.ships.length; i++) {
       if (before[i] && !G.state.ships[i].alive) {

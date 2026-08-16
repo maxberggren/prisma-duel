@@ -505,13 +505,23 @@ function wreckHeat(idx) {
   return t === undefined ? 0 : Math.exp(-t * 0.45) * (t < 0.15 ? t / 0.15 : 1);
 }
 
+/* Fire, sparks and impact glows run on their own clock. On the attract screen
+   the simulation is slowed about eighteenfold, and stepping the VFX with it
+   stretched an authored half-second fireball across nine real seconds: the
+   staged kill fired exactly on cue and then was not visible for another three
+   seconds, peaking at ten. Heat now runs near real time while the ships stay
+   in slow motion -- which is a deliberate register, and it leaves the smoke on
+   the slow clock so it still lingers for turns rather than for seconds. */
+let vfxHeat = 1;
+
 function stepVfx(dt) {
   const R = RULES.HULL_R;
+  const hd = dt * vfxHeat;          // fire, glows and sparks; smoke keeps `dt`
 
   /* ---- fireball ---------------------------------------------------------- */
   for (let i = vfx.fire.length - 1; i >= 0; i--) {
     const p = vfx.fire[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) {
@@ -561,7 +571,7 @@ function stepVfx(dt) {
   /* ---- flash, shock front, thrown light ---------------------------------- */
   for (let i = vfx.glows.length - 1; i >= 0; i--) {
     const p = vfx.glows[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) { vfx.glows.splice(i, 1); continue; }
@@ -580,7 +590,7 @@ function stepVfx(dt) {
   /* ---- embers ------------------------------------------------------------ */
   for (let i = vfx.sparks.length - 1; i >= 0; i--) {
     const p = vfx.sparks[i];
-    p.t += dt;
+    p.t += hd;
     if (p.t < 0) { p.a = 0; continue; }
     const u = p.t / p.life;
     if (u >= 1) { vfx.sparks.splice(i, 1); continue; }
@@ -1398,7 +1408,7 @@ const ATT = {
   zoomMin: 1.55, zoomMax: 2.6,  // close enough to read a hull, wide enough to hold a duel
   minR: 0.30,          // never push closer than this, however tight the action
   maxR: 0.80,          // and never pull back further than this: crop the long shot
-  fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
+  fanReach: 2.3,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
   boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.72,   // hold on a kill this long
@@ -1414,7 +1424,8 @@ const ATT = {
   castGood: 22.0,      // score at which we stop looking
   crowdMaxR: 0.80,     // and how far back the camera may go to hold them
   watchR: 0.74,        // how tight to sit on the ship that is about to go
-  leadIn: 3.2,         // seconds of firefight before the kill lands
+  leadIn: 2.4,         // seconds of firefight before the kill lands
+  heatScale: 0.65,     // fireballs play at about two-thirds of real time
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
   staging: false,
@@ -1428,8 +1439,9 @@ const ATT = {
   subjId: '',
   fps: 24,             // the demo's own frame rate (see attractFrame)
   acc: 0,
-  wGlass: 190, wGlassFirst: 40, wHit: 10,   // a demo pilot values glass over damage
-  wSpread: 55,         // ...and values a wide fan most of all
+  wGlass: 90, wGlassFirst: 40, wHit: 10,    // a demo pilot values glass over damage
+  wSpread: 190,        // ...and values a wide fan most of all
+  wThrow: 26, throwIdeal: 2.6,   // ...with a long free run for it to open into
   pan: 0.22,           // a little slack past the walls, not enough to read as letterboxing
   camT: 0, overT: 0, seed: 20260816,
 };
@@ -1465,6 +1477,16 @@ function attractShotScore(sh, heading, x, y) {
        So aim off-axis, and not so far off-axis that the glass turns mirror. */
     const inc = Math.acos(clamp(Math.abs(dx * first.nx + dy * first.ny), 0, 1));
     score += ATT.wSpread * Math.sin(inc) * (inc > 1.31 ? 0.3 : 1);
+
+    /* And room for the fan to open. Entering glass is not the same thing as
+       producing a fan anyone can see: the colours leave the far face at
+       slightly different angles and need a long free run before that becomes a
+       spread rather than a fringe. Measured on the shipped screen, the one
+       real fan in the opening was eight pixels wide -- it had nowhere to go. */
+    let t = first.t + 0.02;
+    while (t < 4 && prismAt(x + dx * t, y + dy * t) >= 0) t += 0.03;   // out the far side
+    const beyond = sceneHit(x + dx * (t + 0.01), y + dy * (t + 0.01), dx, dy, sh.idx);
+    score += Math.min(beyond ? beyond.t : 3, ATT.throwIdeal) * ATT.wThrow;
   }
   return score;
 }
@@ -1687,6 +1709,15 @@ function attractStage() {
     attractSeedArena(best.seed);                  // rebuild the winner and play to its cue
     for (let i = 0, n = Math.max(0, best.frames - lead); i < n; i++) attractFrame(FR);
     ATT.watch = best.victim;                      // the camera knows who it is here for
+
+    /* Wipe what the pre-roll left behind. Playing forward to the cue can pass
+       through an earlier kill, and the viewer then arrives to find its soot
+       smear and eight unlit shards sitting in the opening frame -- the
+       leftovers of a death they never saw. The field they arrive on is clean;
+       everything they see burn, they saw die. */
+    G.state.debris.length = 0;
+    vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+    vfx.glows.length = vfx.wrecks.length = 0;
   }
   ATT.staging = false;
 
@@ -1968,7 +1999,11 @@ function attractFrame(dt) {
   if (G.phase === 'resolve' && G.ctx) {
     const before = G.state.ships.map(sh => sh.alive);
     stepResolve(sdt);
-    stepVfx(sdt);           // fire and smoke run on the same slowed clock
+    /* Smoke on the sim clock so it still lingers for turns; heat on its own,
+       so a detonation ignites and peaks while you are looking at it. */
+    vfxHeat = ATT.heatScale / Math.max(1e-6, ATT.scale);
+    stepVfx(sdt);
+    vfxHeat = 1;
     attractInterp();
     for (let i = 0; i < G.state.ships.length; i++) {
       if (before[i] && !G.state.ships[i].alive) {
