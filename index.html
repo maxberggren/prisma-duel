@@ -4950,10 +4950,18 @@ function drawGizmo() {
 
   // the predicted track, from the very same integrator the sim uses
   const path = integratePath(sh, m, arena.w, arena.h, arena.prisms, (G.state && G.state.inset) || 0);
-  let t = '';
+  /* Start it at the nose, clear of the hull and its shield halo. The track is
+     an overlay above the canvas, so it cannot pass under the ship the way it
+     should -- drawn from the centre it lay across the craft instead. Beginning
+     outside the halo reads as the course leaving the nose. */
+  const clear = RULES.MUZZLE + RULES.BODY_R * 1.15;
+  let t = 'M' + (q => q.x.toFixed(1) + ' ' + q.y.toFixed(1))(
+    w2s(sh.x + Math.cos(m.heading) * clear, sh.y + Math.sin(m.heading) * clear));
   for (let k = 0; k <= RULES.SUBSTEPS; k += 4) {
-    const p = w2s(path[k].x, path[k].y);
-    t += (k ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
+    const n = path[k];
+    if (Math.hypot(n.x - sh.x, n.y - sh.y) < clear) continue;   // still under the ship
+    const p = w2s(n.x, n.y);
+    t += 'L' + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
   }
   gTrackBk.setAttribute('d', t); gTrack.setAttribute('d', t);
   /* The line is the readout: cool when the course is cheap and the capacitor
@@ -5663,6 +5671,14 @@ function tickClock() {
   if (left <= 0) {
     /* Timeout. In a networked game only the arbiter may declare the turn, so
        every peer resolves the same move set; solo, we declare it ourselves. */
+    /* Your own orders go in as they stand. The clock running out used to
+       throw away the course you had been setting and fly last turn's instead,
+       which is a straight line if you had just been turning -- the one thing
+       nobody ever means. Stragglers on other machines still hold their last
+       course, because that is all this peer knows about them. */
+    const me = selfShip();
+    if (me && me.alive && !committed && G.moves[me.id] === undefined) commitOrders();
+
     if (!NET.live) {
       maybeResolve();
       if (G.phase === 'plan') startResolve(G.moves);
@@ -5794,6 +5810,12 @@ canvas.addEventListener('touchmove', ev => {
   ev.preventDefault();
 }, { passive: false });
 canvas.addEventListener('touchend', () => { pinch = null; }, { passive: true });
+
+oFire.addEventListener('click', () => {
+  if (oFire.disabled) return;
+  G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true;
+});
+oCommit.addEventListener('click', commitOrders);
 
 addEventListener('keydown', ev => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;

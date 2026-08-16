@@ -26,6 +26,17 @@ addEventListener('load', () => setTimeout(() => {
     for (let k = 0; k < 60; k++) { stepVfx(1/60); stepDebris(P.G.state); }
     dirty = true;
     for (let k = 0; k < 8; k++) P.render(0.016);
+
+    /* The orders buttons are wired by hand, and a refactor once removed both
+       click handlers while leaving the buttons on screen: the keyboard still
+       worked, so nothing else noticed. Click them for real. */
+    const me = P.G.state.ships[P.G.selfIdx];
+    P.G.aim.heading = 0.777; P.G.aim.speed = P.RULES.SPEED_MAX * 0.5;
+    document.getElementById('oCommit').dispatchEvent(new MouseEvent('click', {bubbles: true}));
+    const sent = P.G.moves[me.id];
+    if (!sent || Math.abs(sent.heading - 0.777) > 1e-9)
+      throw new Error('COMMIT did not send the course being shown');
+
     document.body.setAttribute('data-boom', 'ok');
   } catch (e) { document.body.setAttribute('data-boom', 'THREW ' + e.message); }
 }, 900));
@@ -54,7 +65,8 @@ checks = [
     ('orders panel present', 'id="orders"' in dom),
     ('a match actually started (roster populated)', 'class="card' in dom),
     ('no uncaught errors',  not fails),
-    ('a destroyed ship renders', 'data-boom="ok"' in dom),
+    ('a destroyed ship renders, and COMMIT sends the shown course',
+     'data-boom="ok"' in dom),
 ]
 ok = True
 for name, passed in checks:
