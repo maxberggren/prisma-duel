@@ -25,7 +25,14 @@ addEventListener('load', () => setTimeout(() => {
     R.demoRan       = ATT.on === true && G.state.turn >= 3;
     R.demoMovedCam  = Math.abs(cam.zoom - 1) > 0.2;
     R.chromeHidden  = document.getElementById('ui').classList.contains('lobbyup');
-    R.accumHeld     = accHold > 0;
+    /* The demo must NOT hold the frame accumulator. Blending the last frames
+       is free antialiasing on a still image, but this camera always drifts, so
+       every blend laid offset copies of a beam over each other and the laser
+       came out striped. */
+    R.accumFree     = accHold === 0;
+    const fxBefore  = fx.length;
+    spawnDamage(0, 9);                             // damage readouts are match HUD
+    R.noDamageNumbers = fx.length === fxBefore;
     const camBefore = cam.zoom;
 
     document.getElementById('bSolo').click();      // start a real practice match
@@ -75,13 +82,14 @@ LABELS = [
     ('demoRan',       'the lobby runs a demo match'),
     ('demoMovedCam',  'the demo takes the camera somewhere of its own'),
     ('chromeHidden',  'in-match HUD is hidden while the lobby is up'),
-    ('accumHeld',     'the frame accumulator is held for the demo'),
+    ('accumFree',     'the demo never blends frames (it would stripe the beams)'),
+    ('noDamageNumbers', 'no floating damage numbers over the demo'),
     ('camWasMoved',   'the camera really had moved before the handover'),
     ('attractOff',    'starting a match stops the demo'),
     ('lobbyGone',     'the lobby closes'),
     ('chromeBack',    'the in-match HUD comes back'),
     ('camReset',      'the camera is handed back at default zoom'),
-    ('accumReleased', 'the accumulator is released'),
+    ('accumReleased', 'the accumulator is left free after handover'),
     ('vfxCleared',    "the demo's smoke and fire do not bleed into the match"),
     ('freshMatch',    'the match starts at turn 0 with everyone alive'),
     ('botsAreThree',  'exactly three bots, and the player is not one'),

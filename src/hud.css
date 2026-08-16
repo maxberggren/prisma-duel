@@ -171,10 +171,25 @@
   .ui.lobbyup .orders, .ui.lobbyup .roster, .ui.lobbyup .hint,
   .ui.lobbyup .giz,    .ui.lobbyup .banner {display:none}
   .modal{
-    width:min(430px,calc(100vw - 32px));border:1px solid var(--line);
+    position:relative;
+    width:min(430px,calc(100vw - 32px));border:1px solid transparent;
     background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
     backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
-    border-radius:16px;padding:24px;box-shadow:0 40px 90px -30px rgba(0,0,0,.95)
+    border-radius:16px;padding:24px;
+    box-shadow:0 40px 90px -30px rgba(0,0,0,.95), 0 0 46px -12px rgba(96,86,220,.42)
+  }
+  /* A dichroic rim, the same film the prisms and the buttons are cut from: a
+     gradient painted into a one-pixel ring by masking out the middle. A flat
+     10%-white hairline disappeared against a scene that is itself dark. */
+  .modal::after{
+    content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;
+    pointer-events:none;
+    background:linear-gradient(135deg,
+      #6fe4ff 0%, #6f7bff 22%, #a45cff 40%, #d95ce0 54%, #3f8bff 72%, #2fc3ac 88%, #6fe4ff 100%);
+    -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;      mask-composite:exclude;
+    opacity:.72;
   }
   .modal h1{margin:0 0 3px;font:600 21px/1 var(--sans);letter-spacing:.30em;text-transform:uppercase}
   .modal .status:empty{display:none}

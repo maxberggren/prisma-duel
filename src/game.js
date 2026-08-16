@@ -514,6 +514,9 @@ const fx = [];
 let dmgAccum = [], dmgSince = [];
 
 function spawnDamage(idx, amount) {
+  /* Damage readouts belong to a match somebody is playing. On the start screen
+     they are HUD furniture floating over what is meant to be a scene. */
+  if (ATT.on) return;
   const sh = G.state.ships[idx];
   const L = LIVERY[idx % LIVERY.length];
   const p = w2s(sh.x, sh.y);
@@ -1215,20 +1218,26 @@ const ATT = {
      visibly alive. */
   scale: 0.095,        // simulated seconds per real second
   evLift: 1.26,        // grade up to pay back what the veil takes
-  hold: 6,             // frames blended into the rolling mean
-  zoomMin: 1.6, zoomMax: 2.9,   // wide enough to hold the engagement, tight enough to read
+  zoomMin: 1.32, zoomMax: 2.9,  // wide enough to hold the engagement, tight enough to read
   minR: 0.30,          // never push closer than this, however tight the action
   maxR: 1.25,          // and never pull back further than this: crop the long shot
   fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
-  boom: null, boomAge: 1e9, boomHold: 26, boomR: 1.55,   // hold on a kill this long
+  boom: null, boomAge: 1e9, boomHold: 26, boomR: 1.9,    // hold on a kill this long
   watch: -1,           // ship staging says is about to die
   crowdR: 2.9,         // how close counts as "in the same fight"
-  crowdWant: 5,        // fighters we would like around the kill
-  crowdMaxR: 2.25,     // and how far back the camera may go to hold them
+  tooClose: 0.85,      // hulls nearer than this read as a collision, not a duel
+  standoff: 1.45,      // range demo pilots try to hold while charging
+  rangeIdeal: 2.4,     // how far away the killing shot ideally comes from
+  wRange: 1.5, wGlassShot: 9.0, wApart: 2.6, wBeams: 2.2,
+  wantAlive: 4,        // fighters that must still be up when the viewer arrives
+  castTries: 4,        // arenas auditioned for the opening
+  castGood: 22.0,      // score at which we stop looking
+  crowdMaxR: 2.95,     // and how far back the camera may go to hold them
   leadIn: 3.2,         // seconds of firefight before the kill lands
-  stageMax: 2600,      // frames of look-ahead when casting the opening (~110 s of demo)
+  stageStep: 0.25,     // seconds of demo per casting step
+  stageMax: 1100,      // casting steps per audition (~6 turns of battle)
   staging: false,
   breathe: 0.075, breatheRate: 0.17,   // ~37 s zoom cycle, perceptible but calm
   drift: 0.085, driftRate: 0.11,       // slow lateral crane drift, sim-independent
@@ -1324,6 +1333,29 @@ function attractOrders(sh) {
      A start screen with no laser on it is the one thing this screen must never
      be, and at demo pace a quiet turn lasts most of a minute. */
   m.thrust = attractAnyoneCharged() ? Math.min(m.thrust, 0.26) : 0;
+
+  /* Demo pilots keep their distance. The stock bot closes until it is almost
+     touching, which on screen reads as two ships colliding rather than duelling
+     -- and a point-blank shot is a two-inch beam. Held apart, the same fight
+     draws lasers right across the arena, which is what runs them through the
+     prisms. While charging, a pilot that is too close breaks off across the
+     enemy's bow rather than boring straight in; the shot itself is still aimed
+     by attractAim below. */
+  if (!m.fire) {
+    let foe = null, best = Infinity;
+    for (const o of G.state.ships) {
+      if (!o.alive || o === sh) continue;
+      const d = Math.hypot(o.x - sh.x, o.y - sh.y);
+      if (d < best) { best = d; foe = o; }
+    }
+    if (foe && best < ATT.standoff) {
+      const away = Math.atan2(sh.y - foe.y, sh.x - foe.x);
+      // tangential, leaning outward the closer it has got
+      const lean = clamp(1 - best / ATT.standoff, 0, 1);
+      const side = angDelta(away, sh.heading) > 0 ? 1 : -1;
+      m.heading = away + side * (Math.PI * 0.5) * (1 - lean * 0.75);
+    }
+  }
   m.speed = Math.min(m.speed, RULES.SPEED_MAX * 0.60);
   if (sh.charge >= RULES.FIRE_COST) { m.fire = true; m.heading = attractAim(sh, m); }
   return m;
@@ -1341,103 +1373,144 @@ function attractWarm(turns) {
   }
 }
 
-function attractStart() {
-  ATT.seed = (ATT.seed + 7919) % 2147483647;
-  newGame(ATT_NAMES.map((name, i) => ({ id: i, name })), ATT.seed, 0);   // six on the field
+/** Build a fresh arena on `seed` and get it into fighting trim. */
+function attractSeedArena(seed) {
+  newGame(ATT_NAMES.map((name, i) => ({ id: i, name })), seed, 0);   // six on the field
   G.bots = new Set(G.state.ships.map(sh => sh.idx));
   NET.live = false;
   ATT.on = true;
   ATT.overT = 0;
   attractWarm(3);
 
-  /* Stagger the capacitors. Four pilots who charge at the same rate from the
-     same start all fire on the same turn and then all reload in silence, and
-     the silence is most of the time. Offset, someone is nearly always
-     discharging -- which is the entire point of the screen. Set before the
-     spin-up below, or that would immediately overwrite a live turn's charges. */
+  /* Stagger the capacitors. Pilots who charge at the same rate from the same
+     start all fire on the same turn and then all reload in silence, and the
+     silence is most of the time. Offset, someone is nearly always discharging
+     -- which is the entire point of the screen. */
   const ships = G.state.ships;
   for (let i = 0; i < ships.length; i++) ships[i].charge = 1 - i * (1 / ships.length);
 
-  accHold = ATT.hold;
   shakeAmp = fireShake = hitShake = 0;
   cam.zoom = ATT.zoomMin;
   ATT.snap = true;             // crane takes its opening mark on the first sized frame
+  ATT.acc = 0; ATT.boom = null; ATT.boomAge = 1e9; ATT.subjId = ''; ATT.watch = -1;
+  vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+  vfx.glows.length = vfx.wrecks.length = 0;
   dirty = true;
+}
 
+function attractStart() {
+  ATT.seed = (ATT.seed + 7919) % 2147483647;
   attractStage();
 }
 
 /* ---------------------------------------------------------------- staging
    Opening on a random moment gives you whatever the battle happened to be
-   doing, which is often nothing. So the demo is cast before it is shown: the
-   simulation is run forward until somebody dies, then rewound and restarted a
-   few seconds short of it. What the viewer gets is a firefight already in
-   progress that pays off, in slow motion, while they are still reading the
+   doing, which is usually nothing much. So the demo is cast before it is
+   shown. Several arenas are auditioned; each is run forward looking for a
+   death worth opening on, and the best one found is rebuilt and restarted a
+   few seconds short of the kill. What the viewer gets is a firefight already
+   in progress that pays off, in slow motion, while they are still reading the
    dialog -- and because the camera is told in advance who is about to die, it
-   is already looking at them and never cuts. The sim is deterministic, so the
-   second pass reproduces the first exactly. */
-function attractSnap() { return JSON.parse(JSON.stringify(G.state)); }
+   is already looking at them and never cuts.
 
-function attractRestore(snap) {
-  const st = G.state;
-  st.turn = snap.turn; st.inset = snap.inset; st.seed = snap.seed;
-  st.arena.prisms.length = 0; for (const q of snap.arena.prisms) st.arena.prisms.push({ ...q });
-  st.debris.length = 0;       for (const d of snap.debris) st.debris.push({ ...d });
-  st.ships.length = 0;        for (const q of snap.ships) st.ships.push({ ...q });
-  arena.prisms = st.arena.prisms;
-  arena.ships = st.ships;
-  G.phase = 'plan'; G.ctx = null; G.sub = 0; G.moves = {};
-  dmgAccum = st.ships.map(() => 0); dmgSince = st.ships.map(() => 0);
-  vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
-  vfx.glows.length = vfx.wrecks.length = 0;
-  ATT.acc = 0; ATT.boom = null; ATT.boomAge = 1e9; ATT.subjId = ''; ATT.watch = -1;
-}
+   Auditioning more than one arena is not indulgence: a match only ever
+   contains five deaths, the pace means the field is effectively frozen for the
+   whole time anybody looks at it, and so a single arena offers almost no
+   choice at all. What is being judged is the frame at the START of the window
+   -- what you actually see first -- not the instant of the kill. */
+function attractCandidate(lead) {
+  /* Casting steps in quarter-seconds, not in frames. The sim advances by
+     elapsed time -- stepping coarsely crosses exactly the same substeps as
+     stepping finely -- so a frame-sized step just meant six times the loop
+     overhead to cover a fortieth of the battle. At 1/24s a whole audition
+     covered under three turns, which is why it found almost no deaths to
+     choose between. */
+  const FR = ATT.stageStep;
+  const hist = [];                      // rolling record of the last `lead` frames
+  let best = null;
 
-function attractStage() {
-  if (ATT.staging) return;                 // never re-enter
-  ATT.staging = true;
-  const snap = attractSnap(), seed0 = vfxSeed;
-  const FR = (1 / ATT.fps) * 1.02;      // just over one demo frame, so it always steps
-
-  /* Not just any kill: one with an audience. A ship dying alone in a corner of
-     a six-by-four arena is a small event on a big empty floor. Keep looking
-     until the victim has company, and settle for the most crowded death seen
-     if the battle never obliges. */
-  let frames = -1, victim = -1, bestCrowd = -1;
   for (let i = 0; i < ATT.stageMax; i++) {
     const before = G.state.ships.map(sh => sh.alive);
     attractFrame(FR);
+
+    /* Record what the opening frame would look like if a kill landed `lead`
+       frames from now: how far apart the fighters are, how many are shooting,
+       and how much of that light is inside glass. */
+    const al = G.state.ships.filter(sh => sh.alive);
+    let tight = Infinity;
+    for (let x = 0; x < al.length; x++)
+      for (let y = x + 1; y < al.length; y++)
+        tight = Math.min(tight, Math.hypot(al[x].x - al[y].x, al[x].y - al[y].y));
+    let glass = 0, tot = 0;
+    for (let q = 0; q < segCount; q++) {
+      const w = q * 12;
+      if (!(segData[w + 7] > 0)) continue;
+      tot++; if (segData[w + 9] > 0.5) glass++;
+    }
+    hist.push({ tight, beams: al.filter(sh => sh.firing).length,
+                glass: tot ? glass / tot : 0, alive: al.length });
+    if (hist.length > lead + 1) hist.shift();
+
     const k = G.state.ships.findIndex((sh, j) => before[j] && !sh.alive);
-    if (k < 0) continue;
-    const v = G.state.ships[k];
-    let crowd = 0;
-    for (const o of G.state.ships)
-      if (o.alive && Math.hypot(o.x - v.x, o.y - v.y) < ATT.crowdR) crowd++;
-    // and on the side of the arena the dialog is not sitting on
-    const off = Math.abs(v.x - attractFavourX());
-    const score = crowd - off * 0.8;
-    if (score > bestCrowd) { bestCrowd = score; frames = i + 1; victim = k; }
-    if (crowd >= ATT.crowdWant && off < 1.1) break;
-    if (G.phase === 'over') break;         // battle ran out before a good one
+    if (k >= 0 && hist.length > lead) {
+      const open = hist[0];                       // the frame the viewer arrives on
+      const v = G.state.ships[k];
+      let crowd = 0, shooter = Infinity;
+      for (const o of G.state.ships) {
+        if (!o.alive) continue;
+        const d = Math.hypot(o.x - v.x, o.y - v.y);
+        if (d < ATT.crowdR) crowd++;
+        if (o.firing) shooter = Math.min(shooter, d);
+      }
+      const score =
+          (open.tight < ATT.tooClose ? -8 : 0)                 // never nose to nose
+        + (open.alive < ATT.wantAlive ? -14 : 0)               // and never a nearly-over battle
+        + open.alive * 1.7
+        + Math.min(open.tight, 2.2) * ATT.wApart
+        + Math.min(open.beams, 3) * ATT.wBeams
+        + open.glass * ATT.wGlassShot
+        + crowd * 0.8
+        + Math.min(shooter, ATT.rangeIdeal) * ATT.wRange
+        - Math.abs(v.x - attractFavourX()) * 0.8;
+      if (!best || score > best.score) best = { frames: i + 1, victim: k, score };
+      if (best.score >= ATT.castGood) break;
+    }
+    if (G.phase === 'over') break;                // battle ran out before a good one
+  }
+  return best;
+}
+
+function attractStage() {
+  if (ATT.staging) return;                        // never re-enter
+  ATT.staging = true;
+  const lead = Math.round(ATT.leadIn / ATT.stageStep);
+  const FR = ATT.stageStep;
+
+  let best = null;
+  for (let t = 0; t < ATT.castTries; t++) {
+    const seed = (ATT.seed + t * 7919) % 2147483647;
+    attractSeedArena(seed);
+    const c = attractCandidate(lead);
+    if (c && (!best || c.score > best.score)) best = { seed, ...c };
+    if (best && best.score >= ATT.castGood) break;
   }
 
-  attractRestore(snap);
-  vfxSeed = seed0;
-  if (frames >= 0) {
-    const stop = Math.max(0, frames - Math.round(ATT.leadIn * ATT.fps));
-    for (let i = 0; i < stop; i++) attractFrame(FR);
-    ATT.watch = victim;                 // the camera knows who it is here for
+  if (best) {
+    attractSeedArena(best.seed);                  // rebuild the winner and play to its cue
+    for (let i = 0, n = Math.max(0, best.frames - lead); i < n; i++) attractFrame(FR);
+    ATT.watch = best.victim;                      // the camera knows who it is here for
   }
   ATT.staging = false;
 
   /* Put the dialog on the side the battle is not. Decided here, once, while
      nothing has been drawn yet -- a dialog that relocated later would be far
      more jarring than any camera move. */
-  let fx = 0, n = 0;
-  for (const sh of G.state.ships) if (sh.alive) { fx += sh.x; n++; }
-  if (n) lobbyEl.classList.toggle('right', (fx / n) < arena.w * 0.5);
+  let fx2 = 0, n2 = 0;
+  for (const sh of G.state.ships) if (sh.alive) { fx2 += sh.x; n2++; }
+  if (n2) lobbyEl.classList.toggle('right', (fx2 / n2) < arena.w * 0.5);
 }
 
+/** Hand the arena back to a real match: the demo owns rather a lot of it. */
 function attractStop() {
   if (!ATT.on) return;
   ATT.on = false;
@@ -1448,6 +1521,7 @@ function attractStop() {
   shakeAmp = fireShake = hitShake = 0;
   cam.zoom = 1; cam.x = VIEW_W * 0.5; cam.y = VIEW_H * 0.5;
   updateView();
+  ATT.watch = -1; ATT.boom = null; ATT.boomAge = 1e9; ATT.subjId = '';
   dirty = true;
 }
 
@@ -1648,6 +1722,7 @@ function attractCamera(dt) {
   cam.x += (subj.x - (strip.mid / W - 0.5) * W / viewScale + driftX - cam.x) * e;
   cam.y += (subj.y + driftY - cam.y) * e;
   updateView();
+
 }
 
 function attractFrame(dt) {
