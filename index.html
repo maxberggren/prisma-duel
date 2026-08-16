@@ -3715,7 +3715,11 @@ function render(dt) {
     gl.uniform1f(pDebris.u.uH, viewScale);
     gl.uniform2f(pDebris.u.uOff, renderOffX, renderOffY);
     gl.uniform2f(pDebris.u.uJitter, jx, jy);
-    gl.uniform1f(pDebris.u.uHullR, RULES.HULL_R);
+    /* Sized against the DRAWN hull, not the collision radius. HULL_R is the
+       laser's target radius and is nearly twice the craft on screen, so every
+       fragment came out about as long as the whole ship -- a wreck twice the
+       size of the thing that made it. */
+    gl.uniform1f(pDebris.u.uHullR, SHIP_DRAW_R);
     gl.uniform4fv(pDebris.u.uFireL, fireLUni);
     gl.uniform1i(pDebris.u.uNFireL, nFireL);
     gl.bindVertexArray(vaoDebris);
