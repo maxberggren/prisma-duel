@@ -390,6 +390,28 @@ sweeper.unref && sweeper.unref();
 process.on('uncaughtException', (e) => log('uncaughtException', e && e.stack || e));
 process.on('unhandledRejection', (e) => log('unhandledRejection', e && e.stack || e));
 
+// Under a container runtime, stopping the service sends SIGTERM and waits ~10 s
+// before SIGKILL. Without this the process ignores it and every stop costs the
+// full timeout. Tell peers why they are being dropped -- a match already in
+// progress is peer-to-peer and survives the signalling server going away, so
+// this is a notice, not a disconnect.
+let shuttingDown = false;
+function shutdown(sig) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  log('shutdown on', sig);
+  clearInterval(sweeper);
+  for (const client of wss.clients) {
+    try { client.close(1001, 'server going away'); } catch (_) {}
+  }
+  wss.close();
+  httpServer.close(() => { log('closed'); process.exit(0); });
+  // Don't let a wedged socket hold the stop open for the full grace period.
+  setTimeout(() => { log('forced exit'); process.exit(0); }, 3000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
 httpServer.listen(PORT, HOST, () => {
   const a = httpServer.address();
   log('lazer signalling server on http://localhost:' + a.port + '/');

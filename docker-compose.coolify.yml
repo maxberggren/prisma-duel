@@ -1,0 +1,52 @@
+# PRISMA DUEL on Coolify -- Docker Compose build pack.
+#
+# Point the Coolify application at this file (Build Pack: Docker Compose,
+# Compose file: docker-compose.coolify.yml). If your Coolify app is instead set
+# to the plain Dockerfile build pack, you do not need this file at all -- the
+# Dockerfile already EXPOSEs 8080 and Coolify routes to it. See README.
+#
+# Differences from the local-play docker-compose.yml, all of them deliberate:
+#
+#   * no `ports:`  -- publishing to the host fights Coolify's proxy and risks a
+#                     port clash on the server. `expose:` keeps 8080 on the
+#                     internal network where Traefik reaches it.
+#   * no `container_name:` and no `restart:` -- Coolify owns both. Setting them
+#                     here makes redeploys collide with the existing container.
+#   * SERVICE_FQDN  -- Coolify's magic variable. It provisions the domain and
+#                     wires the proxy to port 8080 for this service.
+
+services:
+  prisma:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+
+    environment:
+      # Coolify substitutes the generated (or your configured) domain here and
+      # routes HTTPS traffic to port 8080 inside the container.
+      - SERVICE_FQDN_PRISMA_8080
+      - MAX_PLAYERS=${MAX_PLAYERS:-4}
+      - RESUME_GRACE_MS=${RESUME_GRACE_MS:-15000}
+
+    expose:
+      - "8080"
+
+    # Nothing is written at runtime -- the client is baked into the image and
+    # the room table lives in memory.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get({host:'127.0.0.1',port:8080,path:'/healthz',timeout:2500},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3

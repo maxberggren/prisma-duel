@@ -1,0 +1,39 @@
+# Everything the runtime image doesn't need. The Dockerfile copies paths
+# explicitly, so this mostly keeps the build context small and stops a local
+# node_modules or a few hundred megabytes of render output from being shipped
+# to the daemon on every build.
+
+.git
+.gitignore
+
+# Development render output and per-agent working copies.
+out/
+shots/
+regions/
+docs/
+*.png
+
+# Installed locally by npm; the image installs its own from the lockfile.
+node_modules/
+**/node_modules/
+
+# Tooling and notes that never run in the container.
+tools/
+shot.sh
+BRIEF.md
+CRITIC.md
+prompt.md
+README.md
+server/README.md
+
+# Test fixtures pulled in only by the `test` stage, which copies server/ whole.
+# Left available on purpose -- do not ignore server/test-*.js.
+
+*.log
+.env
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# Compose variants are read by the orchestrator, never copied into the image.
+docker-compose.coolify.yml

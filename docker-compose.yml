@@ -1,0 +1,62 @@
+# PRISMA DUEL -- one service: the matchmaking/signalling server, which also
+# hosts the game itself.
+#
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# Then open http://<this machine's LAN IP>:8090/ on every machine that wants to
+# play. Only the handshake goes through here; the match itself runs peer-to-peer
+# between the browsers.
+
+services:
+  prisma:
+    build:
+      context: .
+      target: runtime
+    image: prisma-duel:latest
+    container_name: prisma-duel
+
+    # Host 8090 keeps existing invite links working; 8080 is the port inside.
+    # Override with PORT=9000 docker compose up -d.
+    ports:
+      - "${PORT:-8090}:8080"
+
+    environment:
+      # Up to 4 fighters per room; a room can start with 2.
+      MAX_PLAYERS: "${MAX_PLAYERS:-4}"
+      # How long a dropped peer keeps its seat before the room forgets it.
+      RESUME_GRACE_MS: "${RESUME_GRACE_MS:-15000}"
+
+    restart: unless-stopped
+
+    # Reap zombies and forward signals properly. server.js handles SIGTERM, so
+    # `docker compose down` stops in well under a second rather than timing out.
+    init: true
+    stop_grace_period: 10s
+
+    # Nothing is written at runtime: the client is baked into the image and the
+    # room table lives in memory. A read-only root filesystem makes that a
+    # guarantee rather than an intention.
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get({host:'127.0.0.1',port:8080,path:'/healthz',timeout:2500},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+    # A signalling server relays small JSON messages and nothing else. If it is
+    # using real resources, something is wrong.
+    deploy:
+      resources:
+        limits:
+          memory: 256M

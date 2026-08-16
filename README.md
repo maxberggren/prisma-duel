@@ -26,6 +26,53 @@ The server only does matchmaking and relays the WebRTC handshake. Once the mesh
 is up, **all gameplay traffic is peer-to-peer** — you can kill the server
 mid-match and play on.
 
+## Docker
+
+```bash
+docker compose up -d --build      # http://<your LAN IP>:8090/
+```
+
+One service, one dependency (`ws`), ~165 MB. The image carries the client as
+well as the server, since the server doubles as the static host. It runs as the
+unprivileged `node` user on a read-only root filesystem with all capabilities
+dropped — nothing is written at runtime, because the client is baked in at build
+time and the room table lives in memory.
+
+`PORT` picks the host port (default 8090); the container always listens on 8080.
+`docker build --target test .` runs the core and signalling suites inside the
+image.
+
+### Deploying to Coolify
+
+Either build pack works and neither needs configuration beyond a domain:
+
+| Build pack | Setting |
+|---|---|
+| **Dockerfile** | Nothing to set. Coolify reads `EXPOSE 8080` and routes to it. |
+| **Docker Compose** | Compose file: `docker-compose.coolify.yml` |
+
+Use `docker-compose.coolify.yml`, not `docker-compose.yml`, for the compose
+build pack. The local file publishes a fixed host port and pins a container
+name, which fights Coolify's proxy and collides on redeploy; the Coolify file
+uses `expose` plus a `SERVICE_FQDN_PRISMA_8080` magic variable instead and lets
+Coolify own naming and restart policy.
+
+Three things that usually break a WebSocket app behind a reverse proxy are
+already handled:
+
+- The client derives its signalling URL from `location`, so it uses `wss://`
+  under HTTPS and follows whatever domain Coolify assigns. No build-time URL.
+- The join rate limiter reads `x-forwarded-for`, so players are counted
+  individually rather than all appearing as the proxy's address.
+- `SIGTERM` closes sockets and exits, so redeploys don't sit out the stop
+  timeout. Measured: a full restart cycle takes ~300 ms.
+
+Leave `PORT` unset in Coolify. It has to agree with `EXPOSE`/`Ports Exposes`,
+and changing only one silently breaks routing.
+
+Only the handshake goes through the deployment — matches run browser to browser,
+so a small instance stays idle while people play.
+
 ## How a turn works
 
 Each turn you commit four things, then everyone's orders execute simultaneously
