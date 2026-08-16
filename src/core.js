@@ -26,16 +26,16 @@ const angDelta = (a, b) => {
 
 /* --------------------------------------------------------------- constants */
 const RULES = {
-  ARENA_W: 3.20,            // world units (1 unit = viewport height at fit)
-  ARENA_H: 1.80,
+  ARENA_W: 6.40,            // world units (1 unit = viewport height at fit)
+  ARENA_H: 3.60,
   SUBSTEPS: 96,             // fixed per turn — the source of determinism
   TURN_SECONDS: 4.0,        // real seconds a resolution animation takes
   PLAN_SECONDS: 25,         // planning window before the arbiter forces the turn
 
-  SPEED_MAX: 0.480,         // world units per turn at full thrust
+  SPEED_MAX: 0.770,         // world units per turn at full thrust
                             // (the arena is 1.6 wide, so ~7 turns to cross)
-  SPEED_MIN: 0.080,         // ships are aircraft: they cannot stop
-  ACCEL: 0.165,             // max change in commanded speed per turn
+  SPEED_MIN: 0.128,         // ships are aircraft: they cannot stop
+  ACCEL: 0.264,             // max change in commanded speed per turn
   TURN_RATE: 1.60,          // radians per turn at full thrust, low speed
   TURN_RATE_SPEED_PENALTY: 0.55,  // fraction of agility lost at max speed
 
@@ -50,18 +50,18 @@ const RULES = {
   /* A perfect full-turn lock should strip a shield and bite hull, not delete a
      ship outright — at 0.052 the first volley of a 4-way fight killed everyone
      simultaneously on turn 3, every match. */
-  DPS_MS: 0.032,
+  DPS_MS: 0.026,
 
   CHARGE_MAX: 1,
-  CHARGE_START: 0.55,       // nobody opens with an alpha strike
+  CHARGE_START: 0.30,       // nobody opens with an alpha strike
   CHARGE_RATE: 0.50,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
   DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
   DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
-  HULL_R: 0.0340,           // collision/hit radius — matched to the DRAWN
+  HULL_R: 0.0460,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
-  MUZZLE_CLEAR: 0.053,      // ships keep this clear of prisms, so the muzzle
+  MUZZLE_CLEAR: 0.072,      // ships keep this clear of prisms, so the muzzle
                             // is never inside glass (see MUZZLE in the host)
   COLLIDE_DMG: 62,
 
@@ -69,8 +69,8 @@ const RULES = {
      measured: a bot duel stalemated for 85 turns with both shields pinned at
      full. The mirrors closing also keeps bank shots live as space runs out. */
   RING_START: 7,            // turns of open space before the walls move
-  RING_RATE: 0.032,         // world units of inset per turn
-  RING_MAX: 0.34,
+  RING_RATE: 0.064,         // world units of inset per turn
+  RING_MAX: 0.68,
   /* Once the walls are as tight as they can go, the box itself starts to
      collapse: escalating damage to everyone, so a match always terminates.
      Without it two survivors could still circle inside the closed box —
@@ -96,14 +96,14 @@ function mulberry32(seed) {
 function makeArena(seed, spawnPoints) {
   const rnd = mulberry32(seed);
   const prisms = [];
-  const n = 3;
+  const n = 5;
   for (let i = 0; i < n; i++) {
     // spread them across the middle so they matter to most sight lines
     const t = (i + 0.5) / n;
     const cand = {
-      x: RULES.ARENA_W * (0.18 + 0.64 * t) + (rnd() - 0.5) * 0.22,
-      y: RULES.ARENA_H * (0.18 + 0.64 * rnd()),
-      r: 0.140 + rnd() * 0.105,
+      x: RULES.ARENA_W * (0.14 + 0.72 * t) + (rnd() - 0.5) * 0.34,
+      y: RULES.ARENA_H * (0.14 + 0.72 * rnd()),
+      r: 0.215 + rnd() * 0.165,
       wdir: rnd() * TAU,
       whalf: 0.55 + rnd() * 0.55,
       ior: 1.34 + rnd() * 0.10,
@@ -126,8 +126,8 @@ function makeArena(seed, spawnPoints) {
         if (worstD > RULES.HULL_R * 4.5) break;
         const ax = cand.x - worst.x, ay = cand.y - worst.y;
         const al = Math.hypot(ax, ay) || 1;
-        cand.x += (ax / al) * 0.045;
-        cand.y += (ay / al) * 0.045;
+        cand.x += (ax / al) * 0.075;
+        cand.y += (ay / al) * 0.075;
         cand.x = clamp(cand.x, cand.r * 0.5, RULES.ARENA_W - cand.r * 0.5);
         cand.y = clamp(cand.y, cand.r * 0.5, RULES.ARENA_H - cand.r * 0.5);
       }
@@ -178,13 +178,16 @@ function pushOutOfPrisms(prisms, x, y, R) {
 /* ---------------------------------------------------------------- the ship */
 function makeShip(id, name, i, n) {
   // start on a ring facing the centre, so nobody begins with a free shot
+  /* Spread across the field rather than on a small ring in the middle: on a
+     ring, four pilots converge on the centre within two turns and the match is
+     a brawl before anyone has manoeuvred. The ellipse follows the arena, so
+     the opening spacing scales with the room available. */
   const a = (i / Math.max(1, n)) * TAU + Math.PI * 0.25;
   const cx = RULES.ARENA_W * 0.5, cy = RULES.ARENA_H * 0.5;
-  const R = Math.min(RULES.ARENA_W, RULES.ARENA_H) * 0.36;
   return {
     id, name, idx: i,
-    x: cx + Math.cos(a) * R * (RULES.ARENA_W / RULES.ARENA_H) * 0.62,
-    y: cy + Math.sin(a) * R,
+    x: cx + Math.cos(a) * RULES.ARENA_W * 0.37,
+    y: cy + Math.sin(a) * RULES.ARENA_H * 0.37,
     heading: a + Math.PI,
     speed: RULES.SPEED_MAX * 0.45,
     shield: RULES.SHIELD_MAX,
