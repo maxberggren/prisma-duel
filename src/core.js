@@ -260,15 +260,18 @@ function explode(state, sh, cause) {
      broke up rather than as a pile of shrapnel.
      part: 0 nose  1 forebody  2 port wing  3 stbd wing
            4 centre 5 tail boom 6 port fin  7 stbd fin                        */
+  /* ox is scaled by the same 0.68 the renderer squashes the airframe by, so
+     the wreck comes apart along the craft that was actually drawn. */
+  const LEN = 0.68;
   const PARTS = [
-    { part: 0, ox:  0.80, oy:  0.00, size: 0.43, mass: 0.9 },
-    { part: 1, ox:  0.35, oy:  0.00, size: 0.29, mass: 1.0 },
-    { part: 2, ox: -0.35, oy:  0.55, size: 0.66, mass: 0.7 },
-    { part: 3, ox: -0.35, oy: -0.55, size: 0.66, mass: 0.7 },
-    { part: 4, ox: -0.10, oy:  0.00, size: 0.33, mass: 1.2 },
-    { part: 5, ox: -0.55, oy:  0.00, size: 0.33, mass: 1.0 },
-    { part: 6, ox: -0.82, oy:  0.24, size: 0.33, mass: 0.5 },
-    { part: 7, ox: -0.82, oy: -0.24, size: 0.33, mass: 0.5 },
+    { part: 0, ox:  0.80 * LEN, oy:  0.00, size: 0.43, mass: 0.9 },
+    { part: 1, ox:  0.35 * LEN, oy:  0.00, size: 0.29, mass: 1.0 },
+    { part: 2, ox: -0.35 * LEN, oy:  0.55, size: 0.66, mass: 0.7 },
+    { part: 3, ox: -0.35 * LEN, oy: -0.55, size: 0.66, mass: 0.7 },
+    { part: 4, ox: -0.10 * LEN, oy:  0.00, size: 0.33, mass: 1.2 },
+    { part: 5, ox: -0.55 * LEN, oy:  0.00, size: 0.33, mass: 1.0 },
+    { part: 6, ox: -0.82 * LEN, oy:  0.24, size: 0.33, mass: 0.5 },
+    { part: 7, ox: -0.82 * LEN, oy: -0.24, size: 0.33, mass: 0.5 },
   ];
   const ch = Math.cos(sh.heading), sn = Math.sin(sh.heading);
   for (const P of PARTS) {
@@ -291,6 +294,8 @@ function explode(state, sh, cause) {
       idx: sh.idx,
       burn: 0.2 + rnd() * 0.55,
       rest: 0,
+      // previous pose, for display interpolation between substeps
+      px: wx, py: wy, prot: sh.heading,
     });
   }
   while (state.debris.length > RULES.DEBRIS_MAX) state.debris.shift();
@@ -304,6 +309,11 @@ function stepDebris(state) {
   const lo = IN, hiX = state.arena.w - IN, hiY = state.arena.h - IN;
   const drag = Math.pow(0.015, dt);          // settles inside one turn
   for (const d of state.debris) {
+    /* Remember where this piece was. Wreckage physics runs once per substep,
+       which is 24 times a second in play and far less on the attract screen,
+       so drawn straight it steps visibly. The renderer interpolates from here
+       to the new pose; nothing in the simulation reads these. */
+    d.px = d.x; d.py = d.y; d.prot = d.rot;
     if (d.rest) {
       // the closing wall still shoves settled wreckage along
       d.x = clamp(d.x, lo, Math.max(lo, hiX));
