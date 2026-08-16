@@ -108,7 +108,7 @@ If you do not commit in time, your ship holds its last course.
 ```
 index.html      the shipped game — one self-contained file, no dependencies
 src/core.js     deterministic simulation core (the rules)
-src/core.test.js  35 tests: determinism, rules, and arena invariants
+src/core.test.js  36 tests: determinism, rules, and arena invariants
 src/net.js      WebRTC mesh + lockstep client
 src/game.js     turn loop, orders, preview, netcode glue
 src/hud.{css,html}
@@ -137,18 +137,21 @@ timed out both ended with identical state hashes on both peers.
 ## Tests
 
 ```bash
-node src/core.test.js          # 35 assertions: rules, determinism, invariants
+node src/core.test.js          # 36 assertions: rules, determinism, invariants
 node build.js --check          # index.html is in sync with src/
 python3 tools/boottest.py      # the shipped page actually boots and starts a match
+python3 tools/attracttest.py   # the start screen's demo hands the arena back cleanly
 cd server && node test-signalling.js   # 52 assertions over every server path
 cd server && node test-headless.js     # 45 assertions, 4 real browsers,
                                        # a real 6-link WebRTC mesh
 ```
 
-Current status: **35/35**, **52/52**, **45/45**. The browser suite spawns four
+Current status: **36/36**, **52/52**, **45/45**. The browser suite spawns four
 headless Chromium processes and needs a reasonably idle machine — under heavy
 CPU contention its final "mesh re-formed" step can time out.
 
-Balance is measured rather than guessed: 8 consecutive 4-bot matches all
-reached a decision, median 13 turns, longest 29, with wins spread across all
-four seats and deaths split between lasers, collisions and crashes.
+Balance is measured rather than guessed: 10 consecutive 4-bot matches all
+reached a decision, median 14 turns, longest 30, with deaths split 18 laser /
+12 collision / 3 wall-collapse. Terrain no longer kills anyone: since a crash
+needs the hull itself to touch, flying close to a crystal is a skill rather
+than a death sentence.
