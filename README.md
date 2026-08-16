@@ -12,7 +12,7 @@ were never in your line of sight.
 ## Run it
 
 **Practice, no server needed** — open `index.html` in a browser and pick
-*Practice — 3 bots*.
+*Practice*. You fly against three bots.
 
 **Multiplayer**
 
