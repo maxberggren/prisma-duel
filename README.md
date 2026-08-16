@@ -1,9 +1,11 @@
 # PRISMA DUEL
 
 A top-down, turn-based laser dogfight where the weapon is a real spectral ray
-tracer and the terrain is made of dichroic prisms. Fire through one and your
-beam refracts, disperses into a rainbow fan, and can strike people who were
-never in your line of sight.
+tracer and the terrain is made of dichroic crystals. Every crystal is cut
+differently -- five to eight faces, each vertex at its own radius and angle,
+generated from the arena seed -- so no two arenas look alike. Fire through one
+and your beam refracts, disperses into a rainbow fan, and can strike people who
+were never in your line of sight.
 
 ![Prisma](docs/hero.png)
 
@@ -91,7 +93,7 @@ nose, hitting anything means turning to track — which is exactly what your
 throttle just made harder.
 
 Shields absorb before hull and regenerate only on turns you do not fire. The
-arena walls are mirrors, the prisms are solid cover, and your own bank shot can
+arena walls are mirrors, the crystals are solid cover, and your own bank shot can
 come back and hit you.
 
 **The walls close in.** From turn 7 the mirrored box tightens, and once it is as

@@ -61,9 +61,25 @@ const RULES = {
   DEBRIS_MAX: 64,           // four ships' worth, then the oldest are retired
   HULL_R: 0.0460,           // collision/hit radius — matched to the DRAWN
                             // hull, so a visible wingtip graze actually registers
-  MUZZLE_CLEAR: 0.072,      // ships keep this clear of prisms, so the muzzle
-                            // is never inside glass (see MUZZLE in the host)
-  COLLIDE_DMG: 62,
+  /* What actually has to touch something for it to be a crash. This used to be
+     0.072 -- nearly three times the drawn hull's own radius -- so a ship
+     exploded when the halo around it brushed a wall, well before anything you
+     could see made contact. It is now the airframe's circumscribed radius,
+     with a hair of margin, and it still exceeds MUZZLE (0.0246) so the beam
+     can never start inside glass. */
+  BODY_R: 0.0280,
+  MUZZLE_CLEAR: 0.0280,     // kept as an alias: same number, older name
+  /* Where the beam leaves the ship, from the DRAWN nose: the renderer's hull
+     radius 0.0245 x its 0.68 length squash x 1.474 (where the nose cone ends)
+     plus a hair. It lives here, not in the host, because the invariant that
+     the muzzle never sits inside glass is a rule about BODY_R and this
+     together -- and when the two lived apart, they drifted apart. */
+  MUZZLE: 0.0258,
+  /* A ram used to be very nearly fatal to both, which was fine when most
+     ships died on terrain first. With the crash radius cut to the hull, they
+     survive to ram instead, and at 62 that ended most matches in mutual
+     destruction. It hurts; it no longer settles the match by itself. */
+  COLLIDE_DMG: 21,
 
   /* The walls close in. Without it two cautious pilots can circle forever —
      measured: a bot duel stalemated for 85 turns with both shields pinned at
@@ -100,18 +116,32 @@ function makeArena(seed, spawnPoints) {
   for (let i = 0; i < n; i++) {
     // spread them across the middle so they matter to most sight lines
     const t = (i + 0.5) / n;
+    /* Every crystal is cut differently: five to eight faces, each vertex at
+       its own radius and its own angle. Angular jitter is kept under half a
+       step so the vertices stay in order and the outline can never cross
+       itself -- an hourglass would break the point-in-polygon test and every
+       refraction through it. */
+    const faces = 5 + ((rnd() * 4) | 0);
+    const rad   = 0.215 + rnd() * 0.165;
+    const base  = rnd() * TAU;
+    const verts = [];
+    let bound = 0;
+    for (let k = 0; k < faces; k++) {
+      const a  = base + (k + (rnd() - 0.5) * 0.45) * (TAU / faces);
+      const rr = rad * (0.60 + rnd() * 0.40);
+      verts.push({ x: Math.cos(a) * rr, y: Math.sin(a) * rr });
+      bound = Math.max(bound, rr);
+    }
     const cand = {
       x: RULES.ARENA_W * (0.14 + 0.72 * t) + (rnd() - 0.5) * 0.34,
       y: RULES.ARENA_H * (0.14 + 0.72 * rnd()),
-      r: 0.215 + rnd() * 0.165,
-      wdir: rnd() * TAU,
-      whalf: 0.55 + rnd() * 0.55,
+      verts,
+      r: bound,                        // bounding radius, for cheap rejection
       ior: 1.34 + rnd() * 0.10,
       disp: 0.045 + rnd() * 0.030,
-      /* Static. A rotating prism would make the previewed bank shot a lie —
+      /* Static. A rotating crystal would make the previewed bank shot a lie —
          and it could sweep over a stationary ship, putting a hull inside glass. */
-      seed: rnd(),                     // gives each disc its own film pattern
-      spin: 0,
+      seed: rnd(),                     // gives each crystal its own film pattern
     };
     /* Nudge the prism clear of every spawn point. A ship that began inside a
        prism would fire from a muzzle buried in glass, and the trapped light
@@ -140,19 +170,27 @@ function makeArena(seed, spawnPoints) {
 /* Signed distance to a prism solid (circle minus wedge), matching the shader.
    Ships collide with prisms, so a hull can never sit inside glass — which would
    otherwise put a firing ship's muzzle inside a refracting medium. */
-function sdSector2(qx, qy, wh) {
-  const ay = Math.abs(qy);
-  const ex = Math.cos(wh), ey = Math.sin(wh);
-  const h = Math.max(qx * ex + ay * ey, 0);
-  const d = Math.hypot(qx - ex * h, ay - ey * h);
-  return Math.atan2(ay, qx) <= wh ? -d : d;
-}
+/* Signed distance to a crystal: nearest of its edges, negated inside. The
+   inside test is the standard even-odd crossing count, which is why the
+   outline has to stay simple -- see makeArena. */
 function prismSD(P, x, y) {
-  const qx = x - P.x, qy = y - P.y;
-  const c = Math.cos(-P.wdir), sn = Math.sin(-P.wdir);
-  return Math.max(Math.hypot(qx, qy) - P.r,
-                  -sdSector2(qx * c - qy * sn, qx * sn + qy * c, P.whalf));
+  const px = x - P.x, py = y - P.y;
+  const V = P.verts, n = V.length;
+  let best = Infinity, inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const ax = V[i].x, ay = V[i].y, bx = V[j].x, by = V[j].y;
+    const ex = bx - ax, ey = by - ay;
+    const wx = px - ax, wy = py - ay;
+    const ll = ex * ex + ey * ey;
+    const t = ll > 0 ? Math.max(0, Math.min(1, (wx * ex + wy * ey) / ll)) : 0;
+    const cx = wx - ex * t, cy = wy - ey * t;
+    best = Math.min(best, cx * cx + cy * cy);
+    if (((ay > py) !== (by > py)) &&
+        (px < (bx - ax) * (py - ay) / (by - ay) + ax)) inside = !inside;
+  }
+  return (inside ? -1 : 1) * Math.sqrt(best);
 }
+
 /** Push a point out of any prism it has entered. Returns the corrected point.
     The clearance is the MUZZLE offset, not the hull radius, so a ship nosed up
     against a prism still fires from open space rather than from inside glass. */
@@ -374,7 +412,7 @@ function integratePath(ship, m, arenaW, arenaH, prisms, inset) {
       /* Contact is measured at muzzle clearance rather than at the hull, so a
          ship is never alive with its gun buried in glass — that was the old
          trapped-light bug, where a muzzle inside a prism shredded its owner. */
-      const CL = RULES.MUZZLE_CLEAR;
+      const CL = RULES.BODY_R;
       const lo = CL + IN, hiX = arenaW - CL - IN, hiY = arenaH - CL - IN;
       if (x < lo || x > hiX || y < lo || y > hiY) {
         x = clamp(x, lo, Math.max(lo, hiX));
@@ -396,13 +434,13 @@ function beginTurn(state, movesById) {
   /* The walls closed since last turn, so a ship parked on the old boundary can
      now be outside the new one. The wall physically shoves it back in. */
   {
-    const IN = arenaInset(state.turn), R = RULES.MUZZLE_CLEAR * 1.6;
+    const IN = arenaInset(state.turn), R = RULES.BODY_R * 1.6;
     const lo = IN + R, hiX = state.arena.w - IN - R, hiY = state.arena.h - IN - R;
     for (const sh of state.ships) {
       sh.x = clamp(sh.x, lo, Math.max(lo, hiX));
       sh.y = clamp(sh.y, lo, Math.max(lo, hiY));
       if (state.arena.prisms.length) {
-        const q = pushOutOfPrisms(state.arena.prisms, sh.x, sh.y, RULES.MUZZLE_CLEAR);
+        const q = pushOutOfPrisms(state.arena.prisms, sh.x, sh.y, RULES.BODY_R);
         sh.x = clamp(q.x, lo, Math.max(lo, hiX));
         sh.y = clamp(q.y, lo, Math.max(lo, hiY));
       }
@@ -443,7 +481,6 @@ function applySubstep(state, turnCtx, sub) {
     sh.x = n.x; sh.y = n.y; sh.heading = n.heading; sh.speed = n.speed;
     if (p.crashAt >= 0 && k >= p.crashAt) explode(state, sh, 'crash');
   }
-  for (const pr of state.arena.prisms) pr.wdir += pr.spin / S;
   stepDebris(state);
 }
 
@@ -474,7 +511,9 @@ function applyCollisions(state, turnCtx) {
       const key = i * 8 + j;
       if (turnCtx.collided.has(key)) continue;      // once per pair per turn
       const dx = s[j].x - s[i].x, dy = s[j].y - s[i].y;
-      if (Math.hypot(dx, dy) >= RULES.HULL_R * 2) continue;
+      /* Hulls, not halos. HULL_R is the laser's target radius and is close to
+         twice the drawn airframe; two ships "collided" with a visible gap. */
+      if (Math.hypot(dx, dy) >= RULES.BODY_R * 2) continue;
       turnCtx.collided.add(key);
       /* A ram hurts badly but is not automatically mutual suicide: making it
          instantly fatal ended every measured match on turn 3 with all four
@@ -535,7 +574,9 @@ function stateHash(state) {
     push(s.x); push(s.y); push(s.heading); push(s.speed);
     push(s.shield); push(s.hull); push(s.charge); push(s.alive ? 1 : 0);
   }
-  for (const p of state.arena.prisms) push(p.wdir);
+  /* Crystals never move, so hashing them proves the two peers generated the
+     same arena rather than tracking anything that changes. */
+  for (const p of state.arena.prisms) { push(p.verts[0].x); push(p.verts[0].y); }
   return h >>> 0;
 }
 

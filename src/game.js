@@ -999,8 +999,9 @@ function serialiseState() {
   const st = G.state;
   return {
     turn: st.turn, inset: st.inset || 0, seed: st.seed,
-    prisms: st.arena.prisms.map(p => ({ x: p.x, y: p.y, r: p.r, wdir: p.wdir,
-                                        whalf: p.whalf, ior: p.ior, disp: p.disp, spin: p.spin })),
+    prisms: st.arena.prisms.map(p => ({ x: p.x, y: p.y, r: p.r, ior: p.ior, disp: p.disp,
+                                        seed: p.seed,
+                                        verts: p.verts.map(v => ({ x: v.x, y: v.y })) })),
     ships: st.ships.map(s => ({ id: s.id, name: s.name, idx: s.idx, x: s.x, y: s.y,
                                 heading: s.heading, speed: s.speed, shield: s.shield,
                                 hull: s.hull, charge: s.charge, alive: s.alive, move: s.move })),

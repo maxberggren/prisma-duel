@@ -174,7 +174,7 @@ console.log('\ninvariants under the closing arena');
      over the match) and the solid prisms. Settling them in the wrong order used
      to shove a ship squeezed between the two straight through the wall, and a
      ship that ends up inside a prism fires from a muzzle buried in glass. */
-  const MUZ = C.RULES.HULL_R * 1.35;
+  const MUZ = C.RULES.MUZZLE;
   let outside = 0, muzzleIn = 0, samples = 0, worst = 0;
   for (let seed = 1; seed <= 12; seed++) {
     const st = C.makeState(PLAYERS, seed * 131);
@@ -207,6 +207,8 @@ console.log('\ninvariants under the closing arena');
   ok(`no ship escapes the closing walls (${samples.toLocaleString()} samples)`,
      outside === 0, `${outside} escapes, worst ${worst.toExponential(2)}`);
   ok('no muzzle is ever inside a prism', muzzleIn === 0, `${muzzleIn} occurrences`);
+  ok('the body clearance covers the muzzle, so it cannot poke into glass',
+     C.RULES.BODY_R > C.RULES.MUZZLE);
   ok('the closed arena stays larger than a prism',
      (C.RULES.ARENA_H - 2 * C.RULES.RING_MAX) > 0.30);
 }
@@ -225,7 +227,7 @@ console.log('\ncollisions are fatal');
   ok('and the ship is destroyed by it', !s0.alive);
   ok('leaving wreckage', st.debris.length > 0);
   ok('the wreck stops at the wall, not through it',
-     s0.x >= C.RULES.MUZZLE_CLEAR - 1e-9);
+     s0.x >= C.RULES.BODY_R - 1e-9);
 
   // and into a prism
   const st2 = C.makeState(PLAYERS, 5150);
