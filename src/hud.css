@@ -100,6 +100,11 @@
      dark, near-extinguished version of the film so the hierarchy survives. */
   .btn{
     display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+    /* The label must never wrap: "CHARGING 100%" was folding onto a second
+       line inside the button, which reads as the button being too small for
+       its own text even though nothing overflows. The keyboard chip is the
+       part that gives way. */
+    white-space:nowrap;
     font:600 12px/1 var(--sans);letter-spacing:.05em;color:#d8e2f2;
     background-image:linear-gradient(108deg,
       #171a35 0%, #1d2050 15%, #2a2360 30%, #3a2a63 43%,
@@ -131,7 +136,9 @@
   .btn.primary:hover, .btn.commit:hover{border-color:rgba(214,242,255,.7)}
   .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
-  .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);color:#9fb0c8}
+  .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);
+       color:#9fb0c8;flex:0 1 auto;min-width:0;overflow:hidden}
+  .two .btn{gap:6px;padding-left:8px;padding-right:8px}
 
   /* --------------------------------------------------------------- notes */
   .hint{
@@ -268,6 +275,10 @@
     .modal h1{font-size:19px}
     .modal .sub{margin-bottom:14px}
     .modal .fld{margin:9px 0}
+
+    /* No keyboard on a phone, so the chips are pure decoration -- and they are
+       the only thing standing between a long label and a comfortable button. */
+    .btn .kbd{display:none}
 
     input[type=range]{height:34px}
     input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}

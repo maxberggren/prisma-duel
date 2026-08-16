@@ -149,15 +149,29 @@ function drawGizmo() {
      an overlay above the canvas, so it cannot pass under the ship the way it
      should -- drawn from the centre it lay across the craft instead. Beginning
      outside the halo reads as the course leaving the nose. */
+  /* Begin where the track itself leaves the halo, found by walking the path
+     and interpolating the crossing. Starting at a point along the COMMANDED
+     heading instead put the first vertex off the curve, and on a tight turn
+     -- where the ship is still swinging round to that heading -- the line
+     kinked hard just outside the shield. */
   const clear = RULES.MUZZLE + RULES.BODY_R * 1.15;
-  let t = 'M' + (q => q.x.toFixed(1) + ' ' + q.y.toFixed(1))(
-    w2s(sh.x + Math.cos(m.heading) * clear, sh.y + Math.sin(m.heading) * clear));
+  const rad = n => Math.hypot(n.x - sh.x, n.y - sh.y);
+  let t = '', started = false;
   for (let k = 0; k <= RULES.SUBSTEPS; k += 4) {
     const n = path[k];
-    if (Math.hypot(n.x - sh.x, n.y - sh.y) < clear) continue;   // still under the ship
+    if (!started) {
+      if (rad(n) < clear) continue;                 // still under the ship
+      const prev = path[Math.max(0, k - 4)];
+      const r0 = rad(prev), r1 = rad(n);
+      const f = r1 > r0 ? clamp((clear - r0) / (r1 - r0), 0, 1) : 0;
+      const q = w2s(lerp(prev.x, n.x, f), lerp(prev.y, n.y, f));
+      t = 'M' + q.x.toFixed(1) + ' ' + q.y.toFixed(1);
+      started = true;
+    }
     const p = w2s(n.x, n.y);
     t += 'L' + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
   }
+  if (!started) t = '';                             // wholly inside the halo
   gTrackBk.setAttribute('d', t); gTrack.setAttribute('d', t);
   /* The line is the readout: cool when the course is cheap and the capacitor
      is filling, hot when the run is eating the charge. */
@@ -1017,6 +1031,24 @@ addEventListener('keydown', ev => {
   const k = ev.key.toLowerCase();
   if (k === 'f') { if (!oFire.disabled) { G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true; } }
   else if (ev.key === 'Enter') commitOrders();
+  else if (ev.key.startsWith('Arrow')) {
+    /* The course by keyboard: left and right swing the nose, up and down are
+       the same thing as dragging the handle further out or pulling it in.
+       Shift takes a finer step for lining a shot up through a crystal. */
+    if (G.phase !== 'plan' || committed) return;
+    const sh = selfShip(); if (!sh || !sh.alive) return;
+    const fine = ev.shiftKey ? 0.25 : 1;
+    if (ev.key === 'ArrowLeft')  G.aim.heading -= 0.055 * fine;
+    if (ev.key === 'ArrowRight') G.aim.heading += 0.055 * fine;
+    if (ev.key === 'ArrowUp' || ev.key === 'ArrowDown') {
+      const step = (RULES.SPEED_MAX - RULES.SPEED_MIN) * 0.06 * fine;
+      G.aim.speed = clamp(G.aim.speed + (ev.key === 'ArrowUp' ? step : -step),
+                          RULES.SPEED_MIN, RULES.SPEED_MAX);
+      G.aim.thrust = thrustFor(G.aim.speed);        // the drag pays for itself
+    }
+    ev.preventDefault();
+    syncOrderUI(); gizSig = ''; dirty = true; wakeGiz();
+  }
   else if (k === 'h') ui.classList.toggle('hidden');
   else if (k === '0') resetView();
   else return;
