@@ -13,9 +13,18 @@
   /* dvh, not %: iOS Safari's toolbars change the visible height as you scroll
      and a percentage height keeps measuring the larger one, which pushed a
      bottom-anchored panel below the fold. */
-  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden}
+  /* This is a game, not a document. Dragging a course across the arena was
+     starting text selections, raising the long-press callout, flashing tap
+     highlights and rubber-banding the page -- all of it native behaviour that
+     has no meaning here. The one exception is the text inputs, which are
+     restored below; everything else is inert to a finger except through the
+     handlers the game installs. */
+  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden;
+            overscroll-behavior:none;touch-action:none;
+            -webkit-user-select:none;user-select:none;
+            -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
   body{font:13px/1.45 var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;touch-action:none}
-  canvas{display:block;width:100%;height:100%}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
 
   /* height:100dvh, not just inset:0. A fixed element on iOS is laid out
      against the LAYOUT viewport, which stays tall while Safari's toolbars are
@@ -52,6 +61,13 @@
   .bar.ch > i{background:linear-gradient(90deg,#8a7bff,#c9a7ff)}
   .lbl{display:flex;justify-content:space-between;font:9.5px/1.5 var(--mono);
        letter-spacing:.1em;color:var(--faint);margin-top:6px}
+
+  /* A rival's card, shown beside the pointer while you are over their ship.
+     Four permanent cards spent a corner of the screen on information that
+     matters for a moment at a time. */
+  .peek{position:absolute;left:0;top:0;width:224px;pointer-events:none;z-index:3;
+        opacity:0;transform:translate(-50%,-115%);transition:opacity .12s ease}
+  .peek.on{opacity:1}
 
   /* -------------------------------------------------------------- orders */
   /* Bottom right, and wide enough that ARM and COMMIT keep their labels on
@@ -154,17 +170,6 @@
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
 
   /* --------------------------------------------------------------- notes */
-  /* Bottom left, not centred: the orders card moved to the bottom right and a
-     centred pill ran underneath it. */
-  .hint{
-    position:absolute;left:var(--pad);bottom:var(--pad);
-    max-width:calc(100vw - 400px - 2*var(--pad));
-    font:11.5px/1.4 var(--sans);color:#8e99ad;background:rgba(8,10,15,.62);
-    border:1px solid var(--line);border-radius:100px;padding:8px 16px;
-    backdrop-filter:blur(10px);white-space:nowrap;max-width:calc(100vw - 40px);
-    overflow:hidden;text-overflow:ellipsis;transition:opacity .4s
-  }
-  .hint b{color:#c5d0e2;font-weight:600}
   .banner{
     position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);text-align:center;
     pointer-events:none;transition:opacity .3s
@@ -204,7 +209,7 @@
 
   /* While the lobby is up, the match furniture belongs to a game the viewer
      has not joined yet -- it would read as a broken HUD over the demo. */
-  .ui.lobbyup .orders, .ui.lobbyup .roster, .ui.lobbyup .hint,
+  .ui.lobbyup .orders, .ui.lobbyup .roster,
   .ui.lobbyup .giz,    .ui.lobbyup .banner {display:none}
   .modal{
     position:relative;
@@ -239,6 +244,8 @@
     background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;padding:11px 12px
   }
   .modal input[type=text]:focus{outline:none;border-color:rgba(127,216,255,.55)}
+  /* The callsign and room code are the only things worth selecting. */
+  input,textarea{-webkit-user-select:text;user-select:text;touch-action:auto}
   .modal .btn{margin-top:8px}
   .modal .or{display:flex;align-items:center;gap:10px;margin:16px 0 8px;
              font:9.5px/1 var(--mono);letter-spacing:.16em;color:var(--faint)}
@@ -253,7 +260,7 @@
   .giz.idle{opacity:0;transition:opacity .5s ease .2s}
   .giz svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .hnd{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border:0;padding:0;
-       background:none;cursor:grab;pointer-events:auto}
+       background:none;cursor:grab;pointer-events:auto;touch-action:none}
   .giz.idle .hnd{pointer-events:none}
   .hnd i{position:absolute;inset:11px;border-radius:50%;background:#e7eefb;
          box-shadow:0 0 0 1.5px rgba(0,0,0,.65),0 0 14px 2px rgba(127,216,255,.55)}
@@ -288,7 +295,6 @@
     .card .st{margin-left:0;flex:1 0 100%;font-size:9px;letter-spacing:.06em}
     .card .you{font-size:9px}
     .orders{right:var(--pad);left:var(--pad);width:auto;top:auto;bottom:var(--pad)}
-    .hint{display:none}
 
     /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
        it wants a finger's worth of height to grab, without the rail itself
@@ -308,6 +314,10 @@
     .modal h1{font-size:19px}
     .modal .sub{margin-bottom:14px}
     .modal .fld{margin:9px 0}
+
+    /* 16px or iOS zooms the whole page in when the field takes focus, and
+       leaves it zoomed -- which then breaks every drag on the arena. */
+    .modal input[type=text]{font-size:16px}
 
     /* No keyboard on a phone, so the chips are pure decoration -- and they are
        the only thing standing between a long label and a comfortable button. */

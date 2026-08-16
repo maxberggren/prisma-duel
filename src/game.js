@@ -76,9 +76,15 @@ function syncOrderUI() {
   oFire.disabled = !charged || committed;
   if (!charged) G.aim.fire = false;
   oFire.setAttribute('aria-pressed', G.aim.fire ? 'true' : 'false');
-  $('fireLbl').textContent = !charged
-    ? `CHARGING ${Math.round(sh.charge * 100)}%`
-    : (G.aim.fire ? 'LASER ARMED' : 'ARM LASER');
+  /* The charge percentage lives with the other figures, not inside the button.
+     "CHARGING 100%" is thirteen characters and it was the single thing forcing
+     the two buttons apart -- no width of panel makes that comfortable next to
+     COMMIT on a phone. The button says what it does; the number is read where
+     numbers are read. */
+  $('vChg').textContent = charged ? 'READY' : Math.round(sh.charge * 100) + '%';
+  $('vChg').style.color = charged ? 'var(--warn)' : '';
+  $('fireLbl').textContent = !charged ? 'CHARGING'
+                           : (G.aim.fire ? 'ARMED' : 'ARM LASER');
 
   /* Nothing to commit while the turn is running: the button stayed live
      through the whole resolve, so it read as an action that does nothing. */
@@ -103,11 +109,8 @@ function thrustInk(t) {
 }
 
 /* --------------------------------------------------------------- the roster */
-function renderRoster() {
-  const el = $('roster');
-  if (!G.state) { el.innerHTML = ''; return; }
-  el.innerHTML = '';
-  for (const sh of G.state.ships) {
+/** One fighter's card. Used for your own, and for the peek at a rival. */
+function shipCard(sh) {
     const L = LIVERY[sh.idx % LIVERY.length];
     const c = document.createElement('div');
     c.className = 'card' + (sh.idx === G.selfIdx ? ' self' : '') + (sh.alive ? '' : ' dead');
@@ -123,9 +126,73 @@ function renderRoster() {
       `<div class="bar ch"><i style="width:${sh.charge / RULES.CHARGE_MAX * 100}%"></i></div>` +
       `<div class="lbl"><span>SHLD ${Math.round(sh.shield)}</span><span>HULL ${Math.round(sh.hull)}</span>` +
       `<span>${sh.charge >= 1 ? 'ARMED' : Math.round(sh.charge * 100) + '%'}</span></div>`;
-    el.appendChild(c);
-  }
+    return c;
 }
+
+/* Only your own card is permanent. Everyone else's is a peek, which is what
+   the pointer is for -- see peekAt below. */
+function renderRoster() {
+  const el = $('roster');
+  if (!G.state) { el.innerHTML = ''; return; }
+  el.innerHTML = '';
+  const me = selfShip();
+  if (me) el.appendChild(shipCard(me));
+  if (peekIdx >= 0) showPeek(peekIdx, peekX, peekY);   // keep it live while hovered
+}
+
+/* ------------------------------------------------------------------- peek */
+let peekIdx = -1, peekX = 0, peekY = 0;
+const peekEl = $('peek');
+
+function showPeek(idx, cx, cy) {
+  const sh = G.state && G.state.ships[idx];
+  if (!sh) return hidePeek();
+  peekIdx = idx; peekX = cx; peekY = cy;
+  peekEl.innerHTML = '';
+  peekEl.appendChild(shipCard(sh));
+  /* Above the pointer, and kept inside the window: a card that runs off the
+     edge is worse than no card. */
+  const w = 224, h = peekEl.offsetHeight || 96;
+  const x = clamp(cx, w * 0.5 + 6, innerWidth - w * 0.5 - 6);
+  const y = clamp(cy, h + 12, innerHeight - 6);
+  peekEl.style.transform = `translate(${(x - w * 0.5).toFixed(0)}px, ${(y - h - 10).toFixed(0)}px)`;
+  peekEl.classList.add('on');
+}
+function hidePeek() {
+  if (peekIdx < 0) return;
+  peekIdx = -1;
+  peekEl.classList.remove('on');
+}
+
+/** Which fighter is under this screen point, if any. -1 for none. */
+function shipAtScreen(clientX, clientY) {
+  if (!G.state) return -1;
+  const p = s2w(clientX, clientY);
+  const grab = Math.max(RULES.BODY_R * 2.4, 26 / Math.max(1e-6, viewScale / DPR));
+  let best = -1, bestD = grab;
+  for (const sh of G.state.ships) {
+    if (!sh.alive) continue;
+    const d = Math.hypot(sh.x - p.x, sh.y - p.y);
+    if (d < bestD) { bestD = d; best = sh.idx; }
+  }
+  return best;
+}
+
+canvas.addEventListener('pointermove', ev => {
+  /* Panning does not block it -- on a phone there is no hover at all, and a
+     finger held on a rival is the only way to ask. Setting a course does. */
+  if (drag) return hidePeek();
+  const i = shipAtScreen(ev.clientX, ev.clientY);
+  if (i < 0 || i === G.selfIdx) return hidePeek();
+  showPeek(i, ev.clientX, ev.clientY);
+});
+canvas.addEventListener('pointerleave', hidePeek);
+canvas.addEventListener('pointerup', ev => { if (ev.pointerType !== 'mouse') hidePeek(); });
+canvas.addEventListener('pointerdown', ev => {
+  if (ev.pointerType === 'mouse') return;         // mouse already has hover
+  const i = shipAtScreen(ev.clientX, ev.clientY);
+  if (i >= 0 && i !== G.selfIdx) showPeek(i, ev.clientX, ev.clientY);
+});
 const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 /* ------------------------------------------------------------ gizmo drawing */
@@ -929,6 +996,7 @@ handle.addEventListener('pointerdown', ev => {
   ev.preventDefault();
   drag = { pointerId: ev.pointerId };
   handle.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
   wakeGiz();
 });
 addEventListener('pointermove', ev => {
@@ -971,6 +1039,7 @@ function aimAtPoint(clientX, clientY) {
 
 canvas.addEventListener('pointerdown', ev => {
   camTouched = true;              // panning is the player claiming the view
+  ev.preventDefault();            // never let it become a selection or a callout
   if (!ev.isPrimary || camDrag) return;
   const forcePan = ev.button === 1 || ev.button === 2 || ev.shiftKey;
   if (ev.button !== 0 && !forcePan) return;

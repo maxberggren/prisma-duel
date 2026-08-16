@@ -1,7 +1,10 @@
 <div class="ui" id="ui">
 
-  <!-- fleet roster: one card per fighter -->
+  <!-- your own card, always up -->
   <div class="roster" id="roster" role="list" aria-label="Fighters"></div>
+
+  <!-- and any other fighter's, only while you are pointing at them -->
+  <div class="peek" id="peek" aria-hidden="true"></div>
 
   <!-- orders for the coming turn -->
   <section class="orders" id="orders" aria-label="Orders">
@@ -17,6 +20,7 @@
       <div class="split2" aria-live="polite">
         <div class="fig"><span class="k">THRUST</span><b id="vThr">--</b></div>
         <div class="fig"><span class="k">RECHARGE</span><b id="vRech">--</b></div>
+        <div class="fig"><span class="k">LASER</span><b id="vChg">--</b></div>
       </div>
       <div class="meter"><i id="mThr"></i></div>
       <p id="dSplit" class="sr">Drag the course handle on the arena: further is faster,
@@ -38,9 +42,6 @@
 
   <div class="banner" id="banner" style="opacity:0"><h2 id="bannerT"></h2><p id="bannerS"></p></div>
 
-  <div class="hint" id="hint">
-    <b>Drag</b> the handle: further is faster, and speed is taken from your recharge · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>0</b> reset view
-  </div>
 
   <!-- lobby -->
   <div class="veil" id="lobby">

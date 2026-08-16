@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>PRISMA — Spectral Laser Simulator</title>
 <style>
 /*#HUDCSS-BEGIN*/
@@ -21,9 +21,18 @@
   /* dvh, not %: iOS Safari's toolbars change the visible height as you scroll
      and a percentage height keeps measuring the larger one, which pushed a
      bottom-anchored panel below the fold. */
-  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden}
+  /* This is a game, not a document. Dragging a course across the arena was
+     starting text selections, raising the long-press callout, flashing tap
+     highlights and rubber-banding the page -- all of it native behaviour that
+     has no meaning here. The one exception is the text inputs, which are
+     restored below; everything else is inert to a finger except through the
+     handlers the game installs. */
+  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden;
+            overscroll-behavior:none;touch-action:none;
+            -webkit-user-select:none;user-select:none;
+            -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
   body{font:13px/1.45 var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;touch-action:none}
-  canvas{display:block;width:100%;height:100%}
+  canvas{display:block;width:100%;height:100%;touch-action:none}
 
   /* height:100dvh, not just inset:0. A fixed element on iOS is laid out
      against the LAYOUT viewport, which stays tall while Safari's toolbars are
@@ -60,6 +69,13 @@
   .bar.ch > i{background:linear-gradient(90deg,#8a7bff,#c9a7ff)}
   .lbl{display:flex;justify-content:space-between;font:9.5px/1.5 var(--mono);
        letter-spacing:.1em;color:var(--faint);margin-top:6px}
+
+  /* A rival's card, shown beside the pointer while you are over their ship.
+     Four permanent cards spent a corner of the screen on information that
+     matters for a moment at a time. */
+  .peek{position:absolute;left:0;top:0;width:224px;pointer-events:none;z-index:3;
+        opacity:0;transform:translate(-50%,-115%);transition:opacity .12s ease}
+  .peek.on{opacity:1}
 
   /* -------------------------------------------------------------- orders */
   /* Bottom right, and wide enough that ARM and COMMIT keep their labels on
@@ -162,17 +178,6 @@
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
 
   /* --------------------------------------------------------------- notes */
-  /* Bottom left, not centred: the orders card moved to the bottom right and a
-     centred pill ran underneath it. */
-  .hint{
-    position:absolute;left:var(--pad);bottom:var(--pad);
-    max-width:calc(100vw - 400px - 2*var(--pad));
-    font:11.5px/1.4 var(--sans);color:#8e99ad;background:rgba(8,10,15,.62);
-    border:1px solid var(--line);border-radius:100px;padding:8px 16px;
-    backdrop-filter:blur(10px);white-space:nowrap;max-width:calc(100vw - 40px);
-    overflow:hidden;text-overflow:ellipsis;transition:opacity .4s
-  }
-  .hint b{color:#c5d0e2;font-weight:600}
   .banner{
     position:absolute;left:50%;top:34%;transform:translate(-50%,-50%);text-align:center;
     pointer-events:none;transition:opacity .3s
@@ -212,7 +217,7 @@
 
   /* While the lobby is up, the match furniture belongs to a game the viewer
      has not joined yet -- it would read as a broken HUD over the demo. */
-  .ui.lobbyup .orders, .ui.lobbyup .roster, .ui.lobbyup .hint,
+  .ui.lobbyup .orders, .ui.lobbyup .roster,
   .ui.lobbyup .giz,    .ui.lobbyup .banner {display:none}
   .modal{
     position:relative;
@@ -247,6 +252,8 @@
     background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;padding:11px 12px
   }
   .modal input[type=text]:focus{outline:none;border-color:rgba(127,216,255,.55)}
+  /* The callsign and room code are the only things worth selecting. */
+  input,textarea{-webkit-user-select:text;user-select:text;touch-action:auto}
   .modal .btn{margin-top:8px}
   .modal .or{display:flex;align-items:center;gap:10px;margin:16px 0 8px;
              font:9.5px/1 var(--mono);letter-spacing:.16em;color:var(--faint)}
@@ -261,7 +268,7 @@
   .giz.idle{opacity:0;transition:opacity .5s ease .2s}
   .giz svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .hnd{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border:0;padding:0;
-       background:none;cursor:grab;pointer-events:auto}
+       background:none;cursor:grab;pointer-events:auto;touch-action:none}
   .giz.idle .hnd{pointer-events:none}
   .hnd i{position:absolute;inset:11px;border-radius:50%;background:#e7eefb;
          box-shadow:0 0 0 1.5px rgba(0,0,0,.65),0 0 14px 2px rgba(127,216,255,.55)}
@@ -296,7 +303,6 @@
     .card .st{margin-left:0;flex:1 0 100%;font-size:9px;letter-spacing:.06em}
     .card .you{font-size:9px}
     .orders{right:var(--pad);left:var(--pad);width:auto;top:auto;bottom:var(--pad)}
-    .hint{display:none}
 
     /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
        it wants a finger's worth of height to grab, without the rail itself
@@ -316,6 +322,10 @@
     .modal h1{font-size:19px}
     .modal .sub{margin-bottom:14px}
     .modal .fld{margin:9px 0}
+
+    /* 16px or iOS zooms the whole page in when the field takes focus, and
+       leaves it zoomed -- which then breaks every drag on the arena. */
+    .modal input[type=text]{font-size:16px}
 
     /* No keyboard on a phone, so the chips are pure decoration -- and they are
        the only thing standing between a long label and a comfortable button. */
@@ -340,8 +350,11 @@
 <!--#HUDHTML-BEGIN-->
 <div class="ui" id="ui">
 
-  <!-- fleet roster: one card per fighter -->
+  <!-- your own card, always up -->
   <div class="roster" id="roster" role="list" aria-label="Fighters"></div>
+
+  <!-- and any other fighter's, only while you are pointing at them -->
+  <div class="peek" id="peek" aria-hidden="true"></div>
 
   <!-- orders for the coming turn -->
   <section class="orders" id="orders" aria-label="Orders">
@@ -357,6 +370,7 @@
       <div class="split2" aria-live="polite">
         <div class="fig"><span class="k">THRUST</span><b id="vThr">--</b></div>
         <div class="fig"><span class="k">RECHARGE</span><b id="vRech">--</b></div>
+        <div class="fig"><span class="k">LASER</span><b id="vChg">--</b></div>
       </div>
       <div class="meter"><i id="mThr"></i></div>
       <p id="dSplit" class="sr">Drag the course handle on the arena: further is faster,
@@ -378,9 +392,6 @@
 
   <div class="banner" id="banner" style="opacity:0"><h2 id="bannerT"></h2><p id="bannerS"></p></div>
 
-  <div class="hint" id="hint">
-    <b>Drag</b> the handle: further is faster, and speed is taken from your recharge · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>0</b> reset view
-  </div>
 
   <!-- lobby -->
   <div class="veil" id="lobby">
@@ -4930,9 +4941,15 @@ function syncOrderUI() {
   oFire.disabled = !charged || committed;
   if (!charged) G.aim.fire = false;
   oFire.setAttribute('aria-pressed', G.aim.fire ? 'true' : 'false');
-  $('fireLbl').textContent = !charged
-    ? `CHARGING ${Math.round(sh.charge * 100)}%`
-    : (G.aim.fire ? 'LASER ARMED' : 'ARM LASER');
+  /* The charge percentage lives with the other figures, not inside the button.
+     "CHARGING 100%" is thirteen characters and it was the single thing forcing
+     the two buttons apart -- no width of panel makes that comfortable next to
+     COMMIT on a phone. The button says what it does; the number is read where
+     numbers are read. */
+  $('vChg').textContent = charged ? 'READY' : Math.round(sh.charge * 100) + '%';
+  $('vChg').style.color = charged ? 'var(--warn)' : '';
+  $('fireLbl').textContent = !charged ? 'CHARGING'
+                           : (G.aim.fire ? 'ARMED' : 'ARM LASER');
 
   /* Nothing to commit while the turn is running: the button stayed live
      through the whole resolve, so it read as an action that does nothing. */
@@ -4957,11 +4974,8 @@ function thrustInk(t) {
 }
 
 /* --------------------------------------------------------------- the roster */
-function renderRoster() {
-  const el = $('roster');
-  if (!G.state) { el.innerHTML = ''; return; }
-  el.innerHTML = '';
-  for (const sh of G.state.ships) {
+/** One fighter's card. Used for your own, and for the peek at a rival. */
+function shipCard(sh) {
     const L = LIVERY[sh.idx % LIVERY.length];
     const c = document.createElement('div');
     c.className = 'card' + (sh.idx === G.selfIdx ? ' self' : '') + (sh.alive ? '' : ' dead');
@@ -4977,9 +4991,73 @@ function renderRoster() {
       `<div class="bar ch"><i style="width:${sh.charge / RULES.CHARGE_MAX * 100}%"></i></div>` +
       `<div class="lbl"><span>SHLD ${Math.round(sh.shield)}</span><span>HULL ${Math.round(sh.hull)}</span>` +
       `<span>${sh.charge >= 1 ? 'ARMED' : Math.round(sh.charge * 100) + '%'}</span></div>`;
-    el.appendChild(c);
-  }
+    return c;
 }
+
+/* Only your own card is permanent. Everyone else's is a peek, which is what
+   the pointer is for -- see peekAt below. */
+function renderRoster() {
+  const el = $('roster');
+  if (!G.state) { el.innerHTML = ''; return; }
+  el.innerHTML = '';
+  const me = selfShip();
+  if (me) el.appendChild(shipCard(me));
+  if (peekIdx >= 0) showPeek(peekIdx, peekX, peekY);   // keep it live while hovered
+}
+
+/* ------------------------------------------------------------------- peek */
+let peekIdx = -1, peekX = 0, peekY = 0;
+const peekEl = $('peek');
+
+function showPeek(idx, cx, cy) {
+  const sh = G.state && G.state.ships[idx];
+  if (!sh) return hidePeek();
+  peekIdx = idx; peekX = cx; peekY = cy;
+  peekEl.innerHTML = '';
+  peekEl.appendChild(shipCard(sh));
+  /* Above the pointer, and kept inside the window: a card that runs off the
+     edge is worse than no card. */
+  const w = 224, h = peekEl.offsetHeight || 96;
+  const x = clamp(cx, w * 0.5 + 6, innerWidth - w * 0.5 - 6);
+  const y = clamp(cy, h + 12, innerHeight - 6);
+  peekEl.style.transform = `translate(${(x - w * 0.5).toFixed(0)}px, ${(y - h - 10).toFixed(0)}px)`;
+  peekEl.classList.add('on');
+}
+function hidePeek() {
+  if (peekIdx < 0) return;
+  peekIdx = -1;
+  peekEl.classList.remove('on');
+}
+
+/** Which fighter is under this screen point, if any. -1 for none. */
+function shipAtScreen(clientX, clientY) {
+  if (!G.state) return -1;
+  const p = s2w(clientX, clientY);
+  const grab = Math.max(RULES.BODY_R * 2.4, 26 / Math.max(1e-6, viewScale / DPR));
+  let best = -1, bestD = grab;
+  for (const sh of G.state.ships) {
+    if (!sh.alive) continue;
+    const d = Math.hypot(sh.x - p.x, sh.y - p.y);
+    if (d < bestD) { bestD = d; best = sh.idx; }
+  }
+  return best;
+}
+
+canvas.addEventListener('pointermove', ev => {
+  /* Panning does not block it -- on a phone there is no hover at all, and a
+     finger held on a rival is the only way to ask. Setting a course does. */
+  if (drag) return hidePeek();
+  const i = shipAtScreen(ev.clientX, ev.clientY);
+  if (i < 0 || i === G.selfIdx) return hidePeek();
+  showPeek(i, ev.clientX, ev.clientY);
+});
+canvas.addEventListener('pointerleave', hidePeek);
+canvas.addEventListener('pointerup', ev => { if (ev.pointerType !== 'mouse') hidePeek(); });
+canvas.addEventListener('pointerdown', ev => {
+  if (ev.pointerType === 'mouse') return;         // mouse already has hover
+  const i = shipAtScreen(ev.clientX, ev.clientY);
+  if (i >= 0 && i !== G.selfIdx) showPeek(i, ev.clientX, ev.clientY);
+});
 const esc = s => String(s).replace(/[&<>"]/g, m => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 /* ------------------------------------------------------------ gizmo drawing */
@@ -5783,6 +5861,7 @@ handle.addEventListener('pointerdown', ev => {
   ev.preventDefault();
   drag = { pointerId: ev.pointerId };
   handle.setPointerCapture(ev.pointerId);
+  ev.preventDefault();
   wakeGiz();
 });
 addEventListener('pointermove', ev => {
@@ -5825,6 +5904,7 @@ function aimAtPoint(clientX, clientY) {
 
 canvas.addEventListener('pointerdown', ev => {
   camTouched = true;              // panning is the player claiming the view
+  ev.preventDefault();            // never let it become a selection or a callout
   if (!ev.isPrimary || camDrag) return;
   const forcePan = ev.button === 1 || ev.button === 2 || ev.shiftKey;
   if (ev.button !== 0 && !forcePan) return;

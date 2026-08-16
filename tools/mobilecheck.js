@@ -32,7 +32,7 @@ const PROBE = `(() => {
   /* Force the longest labels the game can show, so the check is about the
      worst case rather than whatever this match happens to be doing. */
   const fl = document.getElementById('fireLbl'), cl = document.getElementById('commitLbl');
-  if (fl) fl.textContent = 'CHARGING 100%';
+  if (fl) fl.textContent = 'ARM LASER';
   if (cl) cl.textContent = 'ORDERS SENT';
   const b = id => { const e = document.getElementById(id); if (!e) return null;
     const r = e.getBoundingClientRect();
@@ -53,6 +53,13 @@ const PROBE = `(() => {
     commitH: lines(oc), armH: lines(of),
     commitOverflow: oc ? oc.scrollWidth - oc.clientWidth : -1,
     armOverflow: of ? of.scrollWidth - of.clientWidth : -1,
+    /* Spare width inside each button with its longest label: the margin the
+       layout has before text starts crushing again. */
+    slack: (() => {
+      if (!oc || !of) return null;
+      const span = el => { const t = el.querySelector('span'); return t ? t.getBoundingClientRect().width : 0; };
+      return [Math.round(of.clientWidth - span(of) - 16), Math.round(oc.clientWidth - span(oc) - 16)];
+    })(),
     canvasFreePx: orders && roster ? Math.round(orders.t - roster.b) : null,
     docScrolls: document.documentElement.scrollHeight > innerHeight + 1,
   };
@@ -139,7 +146,8 @@ function targets() {
     console.log((problems.length ? '  FAIL ' : '  ok   ') +
       d.name.padEnd(18) + v.viewport.padEnd(10) +
       'panel ' + (v.orders ? v.orders.h + 'px' : '?').padEnd(7) +
-      'buttons ' + (v.buttonsSideBySide ? 'side by side' : 'stacked'));
+      'buttons ' + (v.buttonsSideBySide ? 'side by side' : 'stacked').padEnd(13) +
+      'spare ' + (v.slack ? v.slack.join('/') + 'px' : '?'));
     for (const p of problems) console.log('         ' + p);
   }
 
