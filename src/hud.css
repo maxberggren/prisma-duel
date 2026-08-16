@@ -198,8 +198,12 @@
   .modal{
     position:relative;
     width:min(430px,calc(100vw - 32px));border:1px solid transparent;
-    background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
-    backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
+    /* See-through: there is a match going on behind this and the card was
+       hiding it. The blur is what keeps the text readable over whatever
+       happens to pass -- it takes the detail out of the background without
+       taking the light or the colour. */
+    background:linear-gradient(180deg,rgba(18,22,30,.42),rgba(10,12,18,.52));
+    backdrop-filter:blur(13px) saturate(130%);-webkit-backdrop-filter:blur(13px) saturate(130%);
     border-radius:16px;padding:24px;
     /* Lifted off the scene, not dropped into a pit: the card sits over a live
        match, and a heavy shadow made it look pasted on rather than floating. */

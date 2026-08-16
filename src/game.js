@@ -56,7 +56,7 @@ function syncOrderUI() {
   if (!oCommit.isConnected) return;
   if (!sh.alive) {
     // a destroyed player keeps watching; the turn no longer waits on them
-    $('commitLbl').textContent = 'DESTROYED — SPECTATING';
+    $('commitLbl').textContent = 'DESTROYED';       // the button is not the place for a sentence
     oCommit.disabled = oFire.disabled = true;
     oCommit.classList.remove('done');
     return;
