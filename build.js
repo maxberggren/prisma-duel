@@ -30,6 +30,24 @@ for (const part of PARTS) {
   html = html.slice(0, i + part.begin.length) + '\n' + body.trimEnd() + '\n' + html.slice(j);
 }
 
+/* The GPU draws prisms from a fixed-size uniform array while the CPU tracer
+   walks the whole list, so a shader that is one slot short leaves an invisible
+   disc that still refracts the laser and still kills anything that touches it.
+   That shipped once. It does not get to ship twice. */
+{
+  const cap = /uniform vec4\s+uPrism\[(\d+)\]/.exec(html);
+  const made = /const n = (\d+);\s*\/\/?.*|const n = (\d+);/.exec(
+    fs.readFileSync('src/core.js', 'utf8').split('makeArena')[1] || '');
+  const need = made ? parseInt(made[1] || made[2], 10) : null;
+  if (!cap) { console.error('cannot find the uPrism uniform array'); process.exit(1); }
+  if (need === null) { console.error('cannot find the prism count in makeArena'); process.exit(1); }
+  if (parseInt(cap[1], 10) < need) {
+    console.error('SHADER TOO SMALL: makeArena builds ' + need + ' prisms but uPrism[] holds '
+                  + cap[1] + '. Widen uPrism/uPrism2, MAX_PRISM_DRAW and the GLSL loops.');
+    process.exit(1);
+  }
+}
+
 if (process.argv.includes('--check')) {
   console.log(html === before ? 'index.html is in sync with src/' : 'OUT OF SYNC - run: node build.js');
   process.exit(html === before ? 0 : 1);

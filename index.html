@@ -7,7 +7,7 @@
 <style>
 /*#HUDCSS-BEGIN*/
   :root{
-    --ink:#e9edf5; --dim:#8d97ab; --faint:#5c6577;
+    --ink:#e9edf5; --dim:#8d97ab; --faint:#8a94a8;
     --line:rgba(255,255,255,.10);
     --glass:linear-gradient(180deg,rgba(20,24,32,.80),rgba(11,13,19,.86));
     --accent:#7fd8ff;
@@ -71,7 +71,7 @@
   .row{margin:10px 0}
   .row:first-child{margin-top:2px}
   .rhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
-  .rhead label{font:10px/1 var(--mono);letter-spacing:.14em;color:#7e8aa0}
+  .rhead label{font:10px/1 var(--mono);letter-spacing:.14em;color:#98a2b6}
   .rhead b{font:11.5px/1 var(--mono);color:#c8d2e4;font-variant-numeric:tabular-nums;font-weight:500}
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;margin:0;cursor:ew-resize;display:block}
   input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;
@@ -87,20 +87,44 @@
 
   .split{display:flex;justify-content:space-between;font:9.5px/1.4 var(--mono);letter-spacing:.09em;color:var(--faint);margin-top:3px}
 
+  /* The buttons are cut from the same material as the prisms: dichroic film,
+     which is why the stops run indigo -> violet -> blue -> cyan -> teal rather
+     than being any one colour. Thin-film interference shifts hue with viewing
+     angle, so the gradient is oversized and slides on hover -- the same band
+     sweep you get tilting a real coated surface. Secondary buttons wear the
+     dark, near-extinguished version of the film so the hierarchy survives. */
   .btn{
     display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#cfd8e8;
-    background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;
-    padding:11px 12px;cursor:pointer;transition:background var(--dur),border-color var(--dur),color var(--dur);
+    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#d8e2f2;
+    background-image:linear-gradient(108deg,
+      #171a35 0%, #1d2050 15%, #2a2360 30%, #3a2a63 43%,
+      #24406b 57%, #1b5b6b 71%, #1d6a63 84%, #191c3c 100%);
+    background-size:210% 100%;background-position:6% 0;
+    border:1px solid var(--line);border-radius:9px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.10), inset 0 -10px 20px -14px rgba(0,0,0,.85);
+    padding:11px 12px;cursor:pointer;
+    transition:background-position .55s ease, border-color var(--dur), color var(--dur),
+               box-shadow var(--dur);
   }
-  .btn:hover{background:rgba(255,255,255,.10);color:#fff}
+  .btn:hover{background-position:62% 0;color:#fff;border-color:rgba(160,210,255,.34)}
   .btn:active{transform:translateY(1px)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(127,216,255,.5)}
   .btn.fire{margin-top:4px}
   .btn.fire[aria-pressed="true"]{background:rgba(255,107,129,.18);border-color:rgba(255,107,129,.6);color:#ffd9df}
-  .btn.commit{margin-top:9px;background:rgba(127,216,255,.15);border-color:rgba(127,216,255,.42);color:#dff4ff}
-  .btn.commit:hover{background:rgba(127,216,255,.25)}
+  /* The one action a first-time visitor should take, in full film. */
+  .btn.primary, .btn.commit{
+    color:#f4faff;text-shadow:0 1px 7px rgba(0,0,0,.6);
+    background-image:linear-gradient(108deg,
+      #2b2f86 0%, #3a35a8 13%, #5b38b4 26%, #8038a4 38%,
+      #3f63d2 53%, #2a9fc8 67%, #2fc3ac 80%, #3552bd 91%, #2b2f86 100%);
+    border-color:rgba(190,232,255,.46);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34),
+               inset 0 -10px 22px -12px rgba(0,0,0,.75),
+               0 12px 30px -18px rgba(96,72,230,.95);
+  }
+  .btn.primary:hover, .btn.commit:hover{border-color:rgba(214,242,255,.7)}
+  .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);color:#9fb0c8}
 
@@ -122,16 +146,49 @@
   .banner p{margin:9px 0 0;font:11px/1 var(--mono);letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
 
   /* -------------------------------------------------------------- lobby */
-  .veil{position:absolute;inset:0;display:grid;place-items:center;background:rgba(4,5,9,.78);
-        backdrop-filter:blur(7px)}
+  /* There is a match running behind this, so the veil cannot be a sheet of
+     paint. It is a pool of shade centred on the dialog: dense enough under the
+     text to keep it legible, gone by the edges of the frame where the fight
+     is. No backdrop blur -- the whole point of what is behind is thin, sharp
+     beams, and a blur is exactly what destroys them. */
+  .veil{position:absolute;inset:0;display:grid;place-items:center;
+        --vx:50%;
+        background:
+          radial-gradient(52% 64% at var(--vx) 50%,
+            rgba(3,4,8,.93) 0%, rgba(3,4,8,.84) 34%,
+            rgba(3,4,8,.42) 62%, rgba(3,4,8,.10) 82%, rgba(3,4,8,0) 100%),
+          linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
+                          rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
+
+  /* Given room, the dialog moves off the middle and the match gets the rest of
+     the frame. Centring both meant the one thing worth looking at was always
+     directly behind the one thing you have to read. The pool of shade moves
+     with the dialog. */
+  @media (min-width: 1100px){
+    .veil{place-items:center start;padding-left:min(9vw,150px);--vx:26%}
+    /* ...and on the other side when the battle is on the left. At demo zoom the
+       viewport already spans most of the arena, so the camera cannot pan a
+       left-hand fight clear of a left-hand dialog -- it just loses the right
+       half of the field off the edge instead. The side is chosen once, before
+       the first frame, from where the staged fight actually is. */
+    .veil.right{place-items:center end;padding-left:0;padding-right:min(9vw,150px);--vx:74%}
+  }
+
+  /* While the lobby is up, the match furniture belongs to a game the viewer
+     has not joined yet -- it would read as a broken HUD over the demo. */
+  .ui.lobbyup .orders, .ui.lobbyup .roster, .ui.lobbyup .hint,
+  .ui.lobbyup .giz,    .ui.lobbyup .banner {display:none}
   .modal{
-    width:min(430px,calc(100vw - 32px));background:var(--glass);border:1px solid var(--line);
+    width:min(430px,calc(100vw - 32px));border:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
+    backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
     border-radius:16px;padding:24px;box-shadow:0 40px 90px -30px rgba(0,0,0,.95)
   }
   .modal h1{margin:0 0 3px;font:600 21px/1 var(--sans);letter-spacing:.30em;text-transform:uppercase}
+  .modal .status:empty{display:none}
   .modal .sub{margin:0 0 20px;font:10.5px/1.5 var(--mono);letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
   .modal .fld{margin:12px 0}
-  .modal label{display:block;font:10px/1 var(--mono);letter-spacing:.14em;color:#7e8aa0;margin-bottom:6px}
+  .modal label{display:block;font:10px/1 var(--mono);letter-spacing:.14em;color:#98a2b6;margin-bottom:6px}
   .modal input[type=text]{
     width:100%;font:13px/1 var(--mono);letter-spacing:.10em;color:var(--ink);
     background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;padding:11px 12px
@@ -231,7 +288,7 @@
         <input id="lName" type="text" maxlength="12" value="PILOT" autocomplete="off" spellcheck="false">
       </div>
 
-      <button class="btn" id="bSolo" type="button">PRACTICE — 3 BOTS</button>
+      <button class="btn primary" id="bSolo" type="button">PRACTICE — 3 BOTS</button>
 
       <div class="or">MULTIPLAYER</div>
 
@@ -875,6 +932,8 @@ const LIVERY = [
   { name: 'MAGENTA', hue: 0.90, rgb: [1.00, 0.22, 0.72] },
   { name: 'AMBER',   hue: 0.10, rgb: [1.00, 0.66, 0.16] },
   { name: 'VIOLET',  hue: 0.74, rgb: [0.62, 0.36, 1.00] },
+  { name: 'LIME',    hue: 0.28, rgb: [0.55, 1.00, 0.35] },
+  { name: 'CORAL',   hue: 0.03, rgb: [1.00, 0.42, 0.34] },
 ];
 
 /** Game session state (presentation + phase); the rules live in `state`. */
@@ -1013,18 +1072,22 @@ function sceneHit(ox, oy, dx, dy, skipShip) {
 
 /* ------------------------------------------------------------- ray tracer */
 const MAX_SEG = 90000;
-const segData = new Float32Array(MAX_SEG * 12);    // ax ay bx by | r g b power | dist inside _ _
+const segData = new Float32Array(MAX_SEG * 12);    // ax ay bx by | r g b power | dist inside src _
 let segCount = 0;
 const HOT_MAX = 32768;
 const hotData = new Float32Array(HOT_MAX * 6);     // x y r g b power  (impact flares)
 let hotCount = 0;
 
-function pushSeg(ax, ay, bx, by, r, g, b, p, dist, inside) {
+/* `src` is the index of the ship that fired this segment. The beam shader
+   reads only .x/.y of that attribute, so the slot is free, and it lets the
+   attract camera pick out one pilot's light -- including the branches that
+   came out of a prism -- from everyone else's. */
+function pushSeg(ax, ay, bx, by, r, g, b, p, dist, inside, src) {
   if (segCount >= MAX_SEG) return;
   const i = segCount * 12;
   segData[i] = ax; segData[i + 1] = ay; segData[i + 2] = bx; segData[i + 3] = by;
   segData[i + 4] = r; segData[i + 5] = g; segData[i + 6] = b; segData[i + 7] = p;
-  segData[i + 8] = dist; segData[i + 9] = inside; segData[i + 10] = 0; segData[i + 11] = 0;
+  segData[i + 8] = dist; segData[i + 9] = inside; segData[i + 10] = src; segData[i + 11] = 0;
   segCount++;
 }
 function pushHot(x, y, r, g, b, p) {
@@ -1115,7 +1178,7 @@ function castRay(ox, oy, dx, dy, col, power, lam, srcIdx, collectHits) {
 
     const h = sceneHit(x, y, ux, uy, depth === 0 ? srcIdx : -1);
     if (!h) {                                   // should not happen inside a box
-      pushSeg(x, y, x + ux * 4, y + uy * 4, cr, cg, cb, p, dist, inPrism >= 0 ? 1 : 0);
+      pushSeg(x, y, x + ux * 4, y + uy * 4, cr, cg, cb, p, dist, inPrism >= 0 ? 1 : 0, srcIdx);
       continue;
     }
 
@@ -1123,7 +1186,7 @@ function castRay(ox, oy, dx, dy, col, power, lam, srcIdx, collectHits) {
     let att = 1;
     if (inPrism >= 0) { att = Math.exp(-h.t * 0.55); p *= att; }   // Beer-Lambert
     const segP = st[4] * (inPrism >= 0 ? (1 + att) * 0.5 : 1);
-    pushSeg(x, y, hx, hy, cr, cg, cb, segP, dist, inPrism >= 0 ? 1 : 0);
+    pushSeg(x, y, hx, hy, cr, cg, cb, segP, dist, inPrism >= 0 ? 1 : 0, srcIdx);
     const d2 = dist + h.t;
 
     /* ---- a ship hull: the beam is absorbed, and that is the damage ------- */
@@ -1275,13 +1338,18 @@ uniform float uTime;
 uniform vec2  uArena;        // arena extent in world units
 uniform float uInset;        // how far the mirrored walls have closed in
 uniform int   uNPrism;
-uniform vec4  uPrism[4];     // x, y, r, wdir
-uniform vec4  uPrism2[4];    // whalf, ior, disp, -
+/* Six, not four. The arena builds five prisms; the CPU tracer refracts off
+   every one of them, so a shader that can only draw four leaves an invisible
+   disc that still bends your laser and still kills you on contact. */
+uniform vec4  uPrism[6];     // x, y, r, wdir
+uniform vec4  uPrism2[6];    // whalf, ior, disp, seed
 uniform int   uNShip;
-uniform vec4  uShip[4];      // x, y, heading, alive
-uniform vec4  uShipA[4];     // shield 0..1, hull 0..1, charge 0..1, firing
-uniform vec4  uShipC[4];     // livery rgb, hue
-uniform vec4  uShipB[4];     // thrust 0..1, speed 0..1, -, -
+/* Six. A room still seats four, but the attract screen flies a bigger battle
+   and the shader is what caps it. */
+uniform vec4  uShip[6];      // x, y, heading, alive
+uniform vec4  uShipA[6];     // shield 0..1, hull 0..1, charge 0..1, firing
+uniform vec4  uShipC[6];     // livery rgb, hue
+uniform vec4  uShipB[6];     // thrust 0..1, speed 0..1, -, -
 uniform int   uSelf;         // the local player's ship index
 uniform float uHover;
 uniform vec2  uHoverEm;
@@ -2002,7 +2070,7 @@ void shipDraw(inout vec3 col, vec2 P, float px, int i){
       if (tk <= 0.0 || tk >= t0) continue;
       if (length(rk - d*tk) < R) blk = 1.0;
     }
-    for (int k = 0; k < 4; k++){                      // and so does cover
+    for (int k = 0; k < 6; k++){                      // and so does cover
       if (k >= uNPrism) break;
       vec2  rp = uPrism[k].xy - o;
       float tp = clamp(dot(rp, d), 0.0, t0);
@@ -2260,9 +2328,9 @@ void main(){
   }
   //#ENDREGION ARENA
 
-  for (int i=0;i<4;i++){ if(i>=uNPrism) break;
+  for (int i=0;i<6;i++){ if(i>=uNPrism) break;
     prismShadow(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x); }
-  for (int i=0;i<4;i++){ if(i>=uNPrism) break;
+  for (int i=0;i<6;i++){ if(i>=uNPrism) break;
     prismSurface(col, P, px, uPrism[i].xy, uPrism[i].z, uPrism[i].w, uPrism2[i].x, uPrism2[i].w); }
   /* Everything lying on the deck — the fireball and the wreckage — is
      composited here, BEFORE the ships, because the ships are flying over it.
@@ -2273,7 +2341,7 @@ void main(){
     col = col * (1.0 - g.a) + g.rgb;
   }
 
-  for (int i=0;i<4;i++){ if(i>=uNShip) break; shipDraw(col, P, px, i); }
+  for (int i=0;i<6;i++){ if(i>=uNShip) break; shipDraw(col, P, px, i); }
 
   /* --- everything in the arena is lit by a burning wreck --------------------
      Applied after the floor, the prisms and the ships are all in col, so one
@@ -3235,8 +3303,13 @@ function updateView() {
      clamped to its edges, and when it is smaller it simply centres. */
   const halfW = W / (2 * viewScale), halfH = viewAvailH / (2 * viewScale);
   const cx = VIEW_W * 0.5, cy = VIEW_H * 0.5;
-  cam.x = (halfW >= cx) ? cx : clamp(cam.x, halfW, VIEW_W - halfW);
-  cam.y = (halfH >= cy) ? cy : clamp(cam.y, halfH, VIEW_H - halfH);
+  /* The attract camera is allowed a little past the walls. Without the slack a
+     fight in a corner pins the camera, the composed offset is silently lost,
+     and the action ends up behind the dialog -- worse than a strip of wall at
+     the edge of frame. In play the clamp stays exact. */
+  const pad = ATT.on ? ATT.pan : 0;
+  cam.x = (halfW >= cx) ? cx : clamp(cam.x, halfW - pad, VIEW_W - halfW + pad);
+  cam.y = (halfH >= cy) ? cy : clamp(cam.y, halfH - pad, VIEW_H - halfH + pad);
 
   viewOffX = W * 0.5 - cam.x * viewScale;
   viewOffY = viewAvailH * 0.5 - cam.y * viewScale;
@@ -3300,7 +3373,13 @@ let time = 0;
 /* --- progressive supersampling ------------------------------------------- */
 const ACC_MAX = 48;
 function halton(i, b) { let f = 1, r = 0; while (i > 0) { f /= b; r += f * (i % b); i = (i / b) | 0; } return r; }
-function resetAccum() { accN = 0; }
+/* Normally a change to the scene throws the accumulated mean away and starts a
+   fresh supersample. The attract screen sets a floor instead: the sample count
+   stops falling below `accHold`, which turns the progressive supersampler into
+   a rolling mean of the last few frames. On a scene moving that slowly that is
+   free antialiasing plus a trace of motion blur, and it costs nothing extra. */
+let accHold = 0;
+function resetAccum() { accN = Math.min(accN, accHold); }
 let hoverDisc = 0, hoverEm = -1, lastHoverDisc = 0, lastHoverEm = -1;
 
 const fireLUni = new Float32Array(16);
@@ -3311,9 +3390,12 @@ let jitterX = 0, jitterY = 0;
    with it. It is applied to the render transform ONLY — viewOffX/viewOffY, and
    therefore pointer picking and the gizmo, are untouched. */
 let shakeAmp = 0, renderOffX = 0, renderOffY = 0;
-const prismUni = new Float32Array(16), prism2Uni = new Float32Array(16);
-const shipUni = new Float32Array(16), shipAUni = new Float32Array(16), shipCUni = new Float32Array(16);
-const shipBUni = new Float32Array(16);
+const MAX_PRISM_DRAW = 6;
+const prismUni = new Float32Array(MAX_PRISM_DRAW * 4), prism2Uni = new Float32Array(MAX_PRISM_DRAW * 4);
+const MAX_SHIP_DRAW = 6;
+const shipUni = new Float32Array(MAX_SHIP_DRAW * 4), shipAUni = new Float32Array(MAX_SHIP_DRAW * 4),
+      shipCUni = new Float32Array(MAX_SHIP_DRAW * 4);
+const shipBUni = new Float32Array(MAX_SHIP_DRAW * 4);
 
 function render(dt) {
   const aspect = W / H;
@@ -3413,13 +3495,14 @@ function render(dt) {
 
 
   /* ---- 1. environment ---- */
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < MAX_PRISM_DRAW; i++) {
     const P = arena.prisms[i];
     if (P) {
       prismUni[i*4]=P.x; prismUni[i*4+1]=P.y; prismUni[i*4+2]=P.r; prismUni[i*4+3]=P.wdir;
       prism2Uni[i*4]=P.whalf; prism2Uni[i*4+1]=P.ior; prism2Uni[i*4+2]=P.disp; prism2Uni[i*4+3]=P.seed||0;
     } else { for (let k=0;k<4;k++){ prismUni[i*4+k]=0; prism2Uni[i*4+k]=0; } }
-
+  }
+  for (let i = 0; i < MAX_SHIP_DRAW; i++) {
     const S = arena.ships[i];
     if (S) {
       shipUni[i*4]=S.x; shipUni[i*4+1]=S.y; shipUni[i*4+2]=S.heading; shipUni[i*4+3]=S.alive?1:0;
@@ -3442,10 +3525,10 @@ function render(dt) {
     gl.uniform1f(u.uTime, time);
     gl.uniform2f(u.uArena, arena.w, arena.h);
     gl.uniform1f(u.uInset, (G.state && G.state.inset) || 0);
-    gl.uniform1i(u.uNPrism, Math.min(4, arena.prisms.length));
+    gl.uniform1i(u.uNPrism, Math.min(MAX_PRISM_DRAW, arena.prisms.length));
     gl.uniform4fv(u.uPrism, prismUni);
     gl.uniform4fv(u.uPrism2, prism2Uni);
-    gl.uniform1i(u.uNShip, Math.min(4, arena.ships.length));
+    gl.uniform1i(u.uNShip, Math.min(MAX_SHIP_DRAW, arena.ships.length));
     gl.uniform4fv(u.uShip, shipUni);
     gl.uniform4fv(u.uShipA, shipAUni);
     gl.uniform4fv(u.uShipC, shipCUni);
@@ -3574,7 +3657,10 @@ function render(dt) {
     bindTex(u.uScene, src.tex, 0);
     bindTex(u.uBloom, mips[0].tex, 1);
     bindTex(u.uStreak, fboStreakB.tex, 2);
-    gl.uniform1f(u.uExposure, exposure);
+    /* The lobby veil costs the artwork about a stop, so the attract screen is
+       graded up to compensate. Measured: without this the start screen lands a
+       full stop under the plate it was built to look like. */
+    gl.uniform1f(u.uExposure, exposure * (ATT.on ? ATT.evLift : 1));
     gl.uniform1f(u.uBloomK, bloomK);
     gl.uniform1f(u.uStreakK, streakK);
     gl.uniform1f(u.uGrain, grainK);
@@ -4989,7 +5075,8 @@ const fxLayer = document.createElement('div');
 fxLayer.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden';
 gizEl.parentNode.appendChild(fxLayer);
 const fx = [];
-let dmgAccum = [0, 0, 0, 0], dmgSince = [0, 0, 0, 0];
+/* Sized from the match, not hard-coded: the attract screen flies six. */
+let dmgAccum = [], dmgSince = [];
 
 function spawnDamage(idx, amount) {
   const sh = G.state.ships[idx];
@@ -5172,7 +5259,7 @@ function startResolve(moves) {
   G.phase = 'resolve';
   G.ctx = beginTurn(G.state, moves);
   G.sub = 0;
-  dmgAccum = [0, 0, 0, 0]; dmgSince = [0, 0, 0, 0];
+  dmgAccum = G.state.ships.map(() => 0); dmgSince = G.state.ships.map(() => 0);
   for (const sh of G.state.ships) sh.firing = sh.firedThisTurn;
   committed = false;
   banner('', '');
@@ -5268,6 +5355,7 @@ function banner(t, s) {
 
 /** Offer a rematch once the field is settled. */
 function showRematch() {
+  if (ATT.on) return;      // the attract match restarts itself; it has no rematch
   const body = document.querySelector('.orders .obody');
   body.innerHTML = '';
   const b = document.createElement('button');
@@ -5558,11 +5646,15 @@ function setStatus(t, bad) {
   el.textContent = t || '';
   el.className = 'status' + (bad ? ' err' : '');
 }
-function closeLobby() { lobbyEl.style.display = 'none'; }
+function closeLobby() {
+  lobbyEl.style.display = 'none';
+  ui.classList.remove('lobbyup');
+}
 
 $('bSolo').addEventListener('click', () => {
   const name = ($('lName').value || 'PILOT').toUpperCase().slice(0, 12);
   const players = [{ id: 0, name }, { id: 1, name: 'VEGA' }, { id: 2, name: 'ORION' }, { id: 3, name: 'LYRA' }];
+  attractStop();
   newGame(players, 20260815, 0);
   G.bots = new Set([1, 2, 3]);
   NET.live = false;
@@ -5605,6 +5697,7 @@ function startMatchFrom(payload) {
   const players = payload.players.map(p => ({ id: p.id, name: p.name }));
   const selfIdx = players.findIndex(p => p.id === Net.selfId());
   if (selfIdx < 0) { setStatus('This match started without you.', true); return; }
+  attractStop();
   newGame(players, payload.seed, selfIdx);
   NET.live = true;
   closeLobby();
@@ -5663,8 +5756,521 @@ $('bStart').addEventListener('click', () => {
   startMatchFrom(payload);
 });
 
+/* ============================================================== attract mode
+   The lobby is not painted over a still. Behind it a real match is running --
+   the real prisms, the real spectral tracer, the real bot pilots -- at about a
+   fortieth of normal pace, so a turn that takes four seconds in play unfolds
+   over roughly two minutes here. Almost nothing appears to move. What you
+   actually watch is the light: a beam crawling into a prism mouth, the
+   dispersed fan sweeping across a hull, a reflection walking down a wall.
+
+   It runs the same code path as a played turn -- beginTurn, applySubstep,
+   trace, applyHits -- because a bespoke menu animation would drift away from
+   the game it is advertising. Only two things are added, and both are display
+   concerns: positions are interpolated between substeps (at this speed the
+   sim's 96 discrete steps would read as a slideshow), and the frame
+   accumulator is held rather than reset.
+   ========================================================================== */
+const ATT = {
+  on: false,
+  /* Pace. It was 0.026 -- a turn in two and a half minutes -- and measurement
+     said what that really is: 0.05% of pixels changing over three and a half
+     seconds, i.e. a still image. "Almost still" has to still be moving, so a
+     turn now takes about forty seconds: nine times slower than play, and
+     visibly alive. */
+  scale: 0.095,        // simulated seconds per real second
+  evLift: 1.26,        // grade up to pay back what the veil takes
+  hold: 6,             // frames blended into the rolling mean
+  zoomMin: 1.6, zoomMax: 2.9,   // wide enough to hold the engagement, tight enough to read
+  minR: 0.30,          // never push closer than this, however tight the action
+  maxR: 1.25,          // and never pull back further than this: crop the long shot
+  fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
+  shotMax: 65,         // seconds before the camera goes looking for another angle
+  shotT: 0, stale: false, lastShooter: -1,
+  boom: null, boomAge: 1e9, boomHold: 26, boomR: 1.55,   // hold on a kill this long
+  watch: -1,           // ship staging says is about to die
+  crowdR: 2.9,         // how close counts as "in the same fight"
+  crowdWant: 5,        // fighters we would like around the kill
+  crowdMaxR: 2.25,     // and how far back the camera may go to hold them
+  leadIn: 3.2,         // seconds of firefight before the kill lands
+  stageMax: 2600,      // frames of look-ahead when casting the opening (~110 s of demo)
+  staging: false,
+  breathe: 0.075, breatheRate: 0.17,   // ~37 s zoom cycle, perceptible but calm
+  drift: 0.085, driftRate: 0.11,       // slow lateral crane drift, sim-independent
+  margin: 1.45,        // headroom around the subject
+  ease: 0.55,          // how lazily the crane drifts inside one shot
+  pushEase: 4.2,       // ...and how briskly it moves between shots
+  pushFor: 0.9,        // seconds of that brisk move
+  cutT: 9e9,
+  subjId: '',
+  fps: 24,             // the demo's own frame rate (see attractFrame)
+  acc: 0,
+  wGlass: 190, wGlassFirst: 40, wHit: 10,   // a demo pilot values glass over damage
+  wSpread: 55,         // ...and values a wide fan most of all
+  pan: 0.22,           // a little slack past the walls, not enough to read as letterboxing
+  camT: 0, overT: 0, seed: 20260816,
+};
+const ATT_NAMES = ['VEGA', 'ORION', 'LYRA', 'DRACO', 'MENSA', 'CORVUS'];
+
+/* How good does this shot look? Scored geometrically -- how far the shot runs
+   inside glass, and whether it is pointed at anybody -- rather than by running
+   the full tracer on every candidate. Aiming into a prism is precisely the
+   case that makes the tracer branch hardest, so scoring 30 candidates with it
+   cost more than a second per shot. This is the same question asked cheaply;
+   the real dispersion is still computed by the real tracer when it is drawn. */
+function attractShotScore(sh, heading, x, y) {
+  const dx = Math.cos(heading), dy = Math.sin(heading);
+  const first = sceneHit(x + dx * MUZZLE, y + dy * MUZZLE, dx, dy, sh.idx);
+  if (!first) return -Infinity;
+
+  /* Length of the shot that lies inside a prism, by marching the straight
+     line. It ignores the bending, which is fine: this only has to choose where
+     to point, not predict where the light comes out. */
+  let glass = 0;
+  const step = 0.022, far = Math.min(3.4, first.kind === 0 ? 3.4 : first.t + 1.6);
+  for (let t = MUZZLE; t < far; t += step)
+    if (prismAt(x + dx * t, y + dy * t) >= 0) glass += step;
+
+  let score = glass * ATT.wGlass;
+  if (first.kind === 1) score += ATT.wHit;              // still a dogfight
+  if (first.kind === 0) {
+    score += ATT.wGlassFirst;                           // enters the glass cleanly
+    /* How much rainbow you get out of the far side is set at the way in.
+       Snell says the spread between red and violet grows with the sine of the
+       angle of incidence -- a head-on shot barely disperses at all -- but past
+       about 75 degrees Fresnel reflects most of the light away before it can.
+       So aim off-axis, and not so far off-axis that the glass turns mirror. */
+    const inc = Math.acos(clamp(Math.abs(dx * first.nx + dy * first.ny), 0, 1));
+    score += ATT.wSpread * Math.sin(inc) * (inc > 1.31 ? 0.3 : 1);
+  }
+  return score;
+}
+
+/** Pick the prettiest legal course for a pilot that is about to discharge. */
+function attractAim(sh, move) {
+  const inset = (G.state && G.state.inset) || 0;
+  const cands = [move.heading];
+  const at = (tx, ty, spread) => {
+    const a = Math.atan2(ty - sh.y, tx - sh.x);
+    for (const d of spread) cands.push(a + d);
+  };
+  // the prisms are the subject; the wedge mouth is worth approaching off-axis
+  for (const pr of arena.prisms) at(pr.x, pr.y, [-0.12, -0.04, 0, 0.04, 0.12]);
+  for (const o of G.state.ships) if (o.alive && o !== sh) at(o.x, o.y, [0]);
+
+  let bestH = move.heading, bestS = -Infinity;
+  for (const h of cands) {
+    const m = { heading: h, speed: move.speed, thrust: move.thrust, fire: true };
+    const path = integratePath(sh, legaliseMove(sh, m), arena.w, arena.h, arena.prisms, inset);
+    if (path.crashAt >= 0) continue;      // a beautiful shot you do not survive is not one
+    /* Score halfway through the turn and at the end: the nose swings during
+       the burn, so what the viewer sees is a sweep, not a single pose. */
+    const mid = path[(path.length - 1) >> 1], end = path[path.length - 1];
+    const sc = attractShotScore(sh, mid.heading, mid.x, mid.y)
+             + attractShotScore(sh, end.heading, end.x, end.y);
+    if (sc > bestS) { bestS = sc; bestH = h; }
+  }
+  return bestH;
+}
+
+/** Orders for a demo pilot: the same bot brain, biased toward showing light. */
+/** Is anybody able to open fire this turn? */
+function attractAnyoneCharged() {
+  return G.state.ships.some(sh => sh.alive && sh.charge >= RULES.FIRE_COST);
+}
+
+function attractOrders(sh) {
+  const m = botOrders(sh);
+  /* The demo exists to show the optics, so a charged pilot always takes the
+     shot and the power split leans to the capacitor, keeping the quiet gaps
+     between discharges short. Speed is capped because a slow pass lets the
+     beam linger on a prism instead of sweeping past it. */
+  /* If nobody can shoot this turn, everyone dumps power into the capacitor.
+     A start screen with no laser on it is the one thing this screen must never
+     be, and at demo pace a quiet turn lasts most of a minute. */
+  m.thrust = attractAnyoneCharged() ? Math.min(m.thrust, 0.26) : 0;
+  m.speed = Math.min(m.speed, RULES.SPEED_MAX * 0.60);
+  if (sh.charge >= RULES.FIRE_COST) { m.fire = true; m.heading = attractAim(sh, m); }
+  return m;
+}
+
+/** Play whole turns instantly, so the lobby opens mid-dogfight, not at spawn. */
+function attractWarm(turns) {
+  for (let t = 0; t < turns; t++) {
+    const moves = {};
+    for (const sh of G.state.ships) if (sh.alive) moves[sh.id] = attractOrders(sh);
+    const ctx = beginTurn(G.state, moves);
+    for (let k = 1; k <= ctx.substeps; k++) applySubstep(G.state, ctx, k);
+    for (const sh of G.state.ships) sh.firing = false;
+    endTurn(G.state);   // no trace, so nobody takes damage getting into position
+  }
+}
+
+function attractStart() {
+  ATT.seed = (ATT.seed + 7919) % 2147483647;
+  newGame(ATT_NAMES.map((name, i) => ({ id: i, name })), ATT.seed, 0);   // six on the field
+  G.bots = new Set(G.state.ships.map(sh => sh.idx));
+  NET.live = false;
+  ATT.on = true;
+  ATT.overT = 0;
+  attractWarm(3);
+
+  /* Stagger the capacitors. Four pilots who charge at the same rate from the
+     same start all fire on the same turn and then all reload in silence, and
+     the silence is most of the time. Offset, someone is nearly always
+     discharging -- which is the entire point of the screen. Set before the
+     spin-up below, or that would immediately overwrite a live turn's charges. */
+  const ships = G.state.ships;
+  for (let i = 0; i < ships.length; i++) ships[i].charge = 1 - i * (1 / ships.length);
+
+  accHold = ATT.hold;
+  shakeAmp = fireShake = hitShake = 0;
+  cam.zoom = ATT.zoomMin;
+  ATT.snap = true;             // crane takes its opening mark on the first sized frame
+  dirty = true;
+
+  attractStage();
+}
+
+/* ---------------------------------------------------------------- staging
+   Opening on a random moment gives you whatever the battle happened to be
+   doing, which is often nothing. So the demo is cast before it is shown: the
+   simulation is run forward until somebody dies, then rewound and restarted a
+   few seconds short of it. What the viewer gets is a firefight already in
+   progress that pays off, in slow motion, while they are still reading the
+   dialog -- and because the camera is told in advance who is about to die, it
+   is already looking at them and never cuts. The sim is deterministic, so the
+   second pass reproduces the first exactly. */
+function attractSnap() { return JSON.parse(JSON.stringify(G.state)); }
+
+function attractRestore(snap) {
+  const st = G.state;
+  st.turn = snap.turn; st.inset = snap.inset; st.seed = snap.seed;
+  st.arena.prisms.length = 0; for (const q of snap.arena.prisms) st.arena.prisms.push({ ...q });
+  st.debris.length = 0;       for (const d of snap.debris) st.debris.push({ ...d });
+  st.ships.length = 0;        for (const q of snap.ships) st.ships.push({ ...q });
+  arena.prisms = st.arena.prisms;
+  arena.ships = st.ships;
+  G.phase = 'plan'; G.ctx = null; G.sub = 0; G.moves = {};
+  dmgAccum = st.ships.map(() => 0); dmgSince = st.ships.map(() => 0);
+  vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+  vfx.glows.length = vfx.wrecks.length = 0;
+  ATT.acc = 0; ATT.boom = null; ATT.boomAge = 1e9; ATT.subjId = ''; ATT.watch = -1;
+}
+
+function attractStage() {
+  if (ATT.staging) return;                 // never re-enter
+  ATT.staging = true;
+  const snap = attractSnap(), seed0 = vfxSeed;
+  const FR = (1 / ATT.fps) * 1.02;      // just over one demo frame, so it always steps
+
+  /* Not just any kill: one with an audience. A ship dying alone in a corner of
+     a six-by-four arena is a small event on a big empty floor. Keep looking
+     until the victim has company, and settle for the most crowded death seen
+     if the battle never obliges. */
+  let frames = -1, victim = -1, bestCrowd = -1;
+  for (let i = 0; i < ATT.stageMax; i++) {
+    const before = G.state.ships.map(sh => sh.alive);
+    attractFrame(FR);
+    const k = G.state.ships.findIndex((sh, j) => before[j] && !sh.alive);
+    if (k < 0) continue;
+    const v = G.state.ships[k];
+    let crowd = 0;
+    for (const o of G.state.ships)
+      if (o.alive && Math.hypot(o.x - v.x, o.y - v.y) < ATT.crowdR) crowd++;
+    // and on the side of the arena the dialog is not sitting on
+    const off = Math.abs(v.x - attractFavourX());
+    const score = crowd - off * 0.8;
+    if (score > bestCrowd) { bestCrowd = score; frames = i + 1; victim = k; }
+    if (crowd >= ATT.crowdWant && off < 1.1) break;
+    if (G.phase === 'over') break;         // battle ran out before a good one
+  }
+
+  attractRestore(snap);
+  vfxSeed = seed0;
+  if (frames >= 0) {
+    const stop = Math.max(0, frames - Math.round(ATT.leadIn * ATT.fps));
+    for (let i = 0; i < stop; i++) attractFrame(FR);
+    ATT.watch = victim;                 // the camera knows who it is here for
+  }
+  ATT.staging = false;
+
+  /* Put the dialog on the side the battle is not. Decided here, once, while
+     nothing has been drawn yet -- a dialog that relocated later would be far
+     more jarring than any camera move. */
+  let fx = 0, n = 0;
+  for (const sh of G.state.ships) if (sh.alive) { fx += sh.x; n++; }
+  if (n) lobbyEl.classList.toggle('right', (fx / n) < arena.w * 0.5);
+}
+
+function attractStop() {
+  if (!ATT.on) return;
+  ATT.on = false;
+  accHold = 0; resetAccum();
+  // the demo's smoke must not drift into the match the player just started
+  vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+  vfx.glows.length = vfx.wrecks.length = 0;
+  shakeAmp = fireShake = hitShake = 0;
+  cam.zoom = 1; cam.x = VIEW_W * 0.5; cam.y = VIEW_H * 0.5;
+  updateView();
+  dirty = true;
+}
+
+/* The simulation only exists at substep boundaries, which at this pace are
+   about a second apart. Ships are therefore drawn between the two nearest
+   states rather than at one of them. This is display only: the next substep
+   overwrites these positions from the trajectory, so nothing can drift, and
+   the damage pass has already run at the exact substep. */
+function attractInterp() {
+  if (!G.ctx) return;
+  const S = G.ctx.substeps;
+  const t = Math.min(S - 1e-6, Math.max(0, G.sub));
+  const k = Math.floor(t), f = t - k;
+  for (const p of G.ctx.plan) {
+    const sh = p.ship;
+    if (!sh.alive) continue;
+    if (p.crashAt >= 0 && k >= p.crashAt) continue;   // wreckage, not a flight path
+    const a = p.path[k], b = p.path[Math.min(S, k + 1)];
+    if (!a || !b) continue;
+    sh.x = a.x + (b.x - a.x) * f;
+    sh.y = a.y + (b.y - a.y) * f;
+    let dh = b.heading - a.heading;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    sh.heading = a.heading + dh * f;
+    sh.speed = a.speed + (b.speed - a.speed) * f;
+  }
+}
+
+/* What to point the camera at. Two earlier answers were both wrong. The
+   centroid of all the light frames the empty floor between two firefights; the
+   midpoint of one beam frames the empty floor in the middle of it, with the
+   shooter at one edge and the interesting end at the other. So: find the pilot
+   whose shot is doing the most, then frame WHERE IT ARRIVES -- the glass it
+   enters and the fan that comes out the far side. The dispersed fan is the
+   most beautiful thing this renderer makes and it is the thing that kept
+   falling outside the frame. The shooter is allowed to sit near the edge. */
+function attractSubject() {
+  /* A ship coming apart outranks anything else on the field. It is the most
+     dramatic thing the renderer does and it does not last long. */
+  if (ATT.boom && ATT.boomAge < ATT.boomHold) {
+    return { x: ATT.boom.x, y: ATT.boom.y, r: ATT.boomR, id: 'boom' + ATT.boom.idx };
+  }
+  /* Staging has named the ship that is about to die. Sit on it now, so when it
+     goes up the camera is already there and the payoff needs no cut. Framed
+     wide enough to take in whoever is shooting at it. */
+  if (ATT.watch >= 0) {
+    const v = G.state.ships[ATT.watch];
+    if (v && v.alive) {
+      /* Frame the whole engagement around the doomed ship -- everyone close
+         enough to be part of the same fight -- rather than just the pair. */
+      let x0 = v.x, x1 = v.x, y0 = v.y, y1 = v.y;
+      for (const o of G.state.ships) {
+        if (!o.alive || o === v) continue;
+        if (Math.hypot(o.x - v.x, o.y - v.y) > ATT.crowdR) continue;
+        x0 = Math.min(x0, o.x); x1 = Math.max(x1, o.x);
+        y0 = Math.min(y0, o.y); y1 = Math.max(y1, o.y);
+      }
+      const cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5;
+      // keep the victim itself comfortably inside, it is where the payoff lands
+      const r = clamp(Math.max((x1 - x0) * 0.5, (y1 - y0) * 0.5,
+                               Math.hypot(v.x - cx, v.y - cy) + 0.30, ATT.boomR),
+                      ATT.minR, ATT.crowdMaxR);
+      return { x: cx * 0.62 + v.x * 0.38, y: cy * 0.62 + v.y * 0.38, r, id: 'watch' + ATT.watch };
+    }
+    ATT.watch = -1;
+  }
+  let sh = null, bestScore = -1, aim = null;
+  for (const s of G.state.ships) {
+    if (!s.alive || !s.firing) continue;
+    const dx = Math.cos(s.heading), dy = Math.sin(s.heading);
+    const mx = s.x + dx * MUZZLE, my = s.y + dy * MUZZLE;
+    const h = sceneHit(mx, my, dx, dy, s.idx);
+    const t = h ? Math.min(h.t, 3.2) : 1.2;
+    const hx = mx + dx * t, hy = my + dy * t;
+    // glass beats a hull beats a wall; near beats far; company beats solitude
+    let score = (h ? (h.kind === 0 ? 3 : h.kind === 1 ? 2 : 1) : 0) - t * 0.55;
+    for (const o of G.state.ships)
+      if (o.alive && o !== s && Math.hypot(o.x - hx, o.y - hy) < 1.25) score += 0.7;
+    if (ATT.stale && s.idx === ATT.lastShooter) score -= 2.5;   // give someone else the shot
+    score -= Math.abs(hx - attractFavourX()) * 0.45;            // keep clear of the dialog
+    if (score > bestScore) { bestScore = score; sh = s; aim = { dx, dy, t, mx, my, hx, hy, h }; }
+  }
+  if (!sh) return null;            // nobody is firing: the caller holds the last shot
+
+  /* Bounding box of this pilot's light AFTER it first hits something -- which
+     is exactly the refracted fan, the internal reflections and the bounces. */
+  let x0 = aim.hx, y0 = aim.hy, x1 = aim.hx, y1 = aim.hy;
+  /* If the shot is going into glass, the whole disc is the subject. A prism
+     cropped by the frame edge stops reading as a prism and becomes a blue
+     blob, and the refraction it is performing becomes unreadable. */
+  if (aim.h && aim.h.kind === 0) {
+    const P = arena.prisms[aim.h.idx];
+    if (P) {
+      x0 = Math.min(x0, P.x - P.r); x1 = Math.max(x1, P.x + P.r);
+      y0 = Math.min(y0, P.y - P.r); y1 = Math.max(y1, P.y + P.r);
+    }
+  }
+  const lim = ATT.fanReach;
+  for (let i = 0; i < segCount; i++) {
+    const o = i * 12;
+    if (segData[o + 10] !== sh.idx || !(segData[o + 7] > 0)) continue;
+    if (segData[o + 8] < aim.t * 0.98) continue;                // still on the approach
+    for (const [px, py] of [[segData[o], segData[o + 1]], [segData[o + 2], segData[o + 3]]]) {
+      if (Math.abs(px - aim.hx) > lim || Math.abs(py - aim.hy) > lim) continue;  // far bounce
+      x0 = Math.min(x0, px); x1 = Math.max(x1, px);
+      y0 = Math.min(y0, py); y1 = Math.max(y1, py);
+    }
+  }
+
+  /* Sit on the arrival, leaning toward the fan, and pull back down the beam a
+     little so the incoming shot leads into the frame instead of appearing at
+     the edge. */
+  const fx = (x0 + x1) * 0.5, fy = (y0 + y1) * 0.5;
+  const lead = Math.min(aim.t, 1.0) * 0.28;
+  const x = fx * 0.55 + aim.hx * 0.45 - aim.dx * lead;
+  const y = fy * 0.55 + aim.hy * 0.45 - aim.dy * lead;
+  const r = clamp(Math.max((x1 - x0) * 0.5, (y1 - y0) * 0.5, lead + 0.16), ATT.minR, ATT.maxR);
+  ATT.lastShooter = sh.idx;
+  return { x, y, r, id: 'fire' + sh.idx + (ATT.stale ? 'b' : '') };
+}
+
+/* Where on screen the shot may sit, in device pixels. Read from the dialog's
+   own rectangle rather than a hard-coded fraction: a magic number disagreed
+   with the CSS breakpoint by 200px, and in that band the camera pushed the
+   fight to two-thirds across while the dialog was still centred on top of it.
+   The layout is the authority on where the free space is. */
+function attractStrip() {
+  const m = lobbyEl.style.display === 'none' ? null : lobbyEl.querySelector('.modal');
+  const r = m && m.getBoundingClientRect();
+  const pad = 44 * DPR;
+  let lo = pad, hi = W - pad;
+  if (r && r.width) {
+    const right = r.right * DPR, left = r.left * DPR;
+    // take whichever side of the dialog has more room; if neither is enough of
+    // the frame to compose in, give up and use the whole width
+    const rightRoom = W - right, leftRoom = left;
+    if (Math.max(rightRoom, leftRoom) > W * 0.42) {
+      if (rightRoom >= leftRoom) lo = right + pad; else hi = left - pad;
+    }
+  }
+  return { lo, hi, mid: (lo + hi) * 0.5, half: Math.max(80, (hi - lo) * 0.5) };
+}
+
+/* Which side of the ARENA the camera would like the action to be on. At demo
+   zoom the viewport already covers most of the arena width, so the camera has
+   barely a unit of pan to give -- asking it to push a fight by the left wall
+   over to the right of the frame is geometrically impossible, and it silently
+   delivered the fight behind the dialog instead. So the fight is cast on the
+   free side rather than shoved there afterwards. */
+function attractFavourX() {
+  const st = attractStrip();
+  return st.mid > W * 0.5 ? arena.w * 0.66 : arena.w * 0.34;
+}
+
+/** A crane, not a game camera: slow enough that the drift is easy to miss. */
+function attractCamera(dt) {
+  /* The demo starts before the canvas has been sized, when viewScale is still
+     zero. Dividing the frame width by it put NaN into the camera and rendered
+     the whole arena nowhere -- so wait for a real viewport. */
+  if (!W || !(viewScale > 0)) return;
+  const subj = attractSubject();
+  if (!subj) return;                  // hold the last shot rather than drift to nothing
+
+  /* A single pilot firing turn after turn is one unbroken shot, and four of
+     nine sampled frames came back identical because of it. After a while the
+     camera is made to look for someone else. */
+  const cut = subj.id !== ATT.subjId;
+  if (cut) { ATT.subjId = subj.id; ATT.shotT = 0; ATT.cutT = 0; ATT.stale = false; }
+  else { ATT.shotT += Math.min(dt, 1); if (ATT.shotT > ATT.shotMax) ATT.stale = true; }
+  ATT.cutT += Math.min(dt, 1);
+
+  ATT.camT += Math.min(dt, 1);
+  const strip = attractStrip();
+
+  /* Zoom so the subject fits the free strip -- not the whole viewport, which
+     is what let the dialog eat the interesting end of the shot. Then breathe,
+     on a period short enough to be perceptible: this is the one bit of motion
+     that does not depend on the simulation, and on a screen this slow it is
+     what says "running" rather than "screenshot". */
+  const need = Math.max(ATT.minR, subj.r) * ATT.margin;
+  const fit = Math.min(strip.half, viewAvailH * 0.5) / (fitScale * need);
+  const breathe = 1 + ATT.breathe * Math.sin(ATT.camT * ATT.breatheRate);
+  const zTarget = clamp(fit, ATT.zoomMin, ATT.zoomMax) * breathe;
+
+  /* An instant cut reads as a glitch on a screen this still, and a slow ease
+     leaves the camera trailing the action forever. So: a fast push that lands
+     inside a second, then the lazy drift. */
+  const rate = ATT.cutT < ATT.pushFor ? ATT.pushEase : ATT.ease;
+  const e = 1 - Math.pow(0.5, Math.min(dt, 1) * rate);
+  cam.zoom += (zTarget - cam.zoom) * e;
+  updateView();                       // refresh viewScale before using it below
+
+  /* Put the subject in the middle of the free strip, with a slow lateral drift
+     so the frame is never nailed down. */
+  const driftX = Math.cos(ATT.camT * ATT.driftRate) * ATT.drift;
+  const driftY = Math.sin(ATT.camT * ATT.driftRate * 0.73) * ATT.drift * 0.6;
+  cam.x += (subj.x - (strip.mid / W - 0.5) * W / viewScale + driftX - cam.x) * e;
+  cam.y += (subj.y + driftY - cam.y) * e;
+  updateView();
+}
+
+function attractFrame(dt) {
+  /* Inert unless the demo owns the arena. gameFrame already checks, but a
+     stray call -- the ?attract fast-forward, anything added later -- must not
+     be able to step somebody's real match. */
+  if (!ATT.on) return;
+
+  /* Take the opening mark before anything else. This used to sit after the
+     frame-rate gate below, so the first two or three frames were drawn at the
+     default centred pose and the camera then jumped to its real framing --
+     which is exactly what "it starts zoomed in and then moves" was. */
+  if (ATT.snap && W && viewScale > 0) { attractCamera(1e3); ATT.snap = false; }
+
+  /* The demo draws at its own rate, not the display's. At a fortieth of pace
+     the difference between 24 and 60 frames a second is invisible -- what is
+     very visible is a menu screen that spins up the fan of the laptop it is
+     sitting on. Skipped frames cost nothing: the sim is stepped by the whole
+     elapsed time when the frame does come. */
+  ATT.acc += dt;
+  if (ATT.acc < 1 / ATT.fps) return;
+  dt = ATT.acc; ATT.acc = 0;
+
+  const sdt = dt * ATT.scale;
+  if (G.phase === 'plan') {
+    const moves = {};
+    for (const sh of G.state.ships) if (sh.alive) moves[sh.id] = attractOrders(sh);
+    startResolve(moves);
+  }
+  if (G.phase === 'resolve' && G.ctx) {
+    const before = G.state.ships.map(sh => sh.alive);
+    stepResolve(sdt);
+    stepVfx(sdt);           // fire and smoke run on the same slowed clock
+    attractInterp();
+    for (let i = 0; i < G.state.ships.length; i++) {
+      if (before[i] && !G.state.ships[i].alive) {
+        ATT.boom = { x: G.state.ships[i].x, y: G.state.ships[i].y, idx: i };
+        ATT.boomAge = 0;
+      }
+    }
+  }
+  ATT.boomAge += dt;
+  if (G.phase === 'over') {
+    /* Not while casting. The staging search runs the battle forward, and a
+       battle that reaches its end here would call attractStart -- from inside
+       attractStart -- and the outer pass would then overwrite whatever the
+       inner one had carefully set up. */
+    if (ATT.staging) return;
+    ATT.overT += dt;
+    if (ATT.overT > 5) attractStart();     // fresh arena, fresh pilots
+  }
+  attractCamera(dt);
+  dirty = true;
+}
+
 /* ------------------------------------------------------------- per-frame */
 function gameFrame(dt) {
+  if (ATT.on) { attractFrame(dt); stepFx(dt); return; }
   tickClock();
   /* Nothing in the world moves while orders are being given, so the fire and
      smoke hold their pose too — a drifting plume over a frozen battlefield read
@@ -5699,7 +6305,19 @@ syncOrderUI();
    and handy for showing the game without clicking through the lobby. */
 if (new URLSearchParams(location.search).has('solo')) {
   requestAnimationFrame(() => $('bSolo').click());
+} else {
+  /* Nothing has been chosen yet, so the arena is free: run the demo behind the
+     lobby. Any real match calls attractStop() and takes the arena back. */
+  ui.classList.add('lobbyup');
+  attractStart();
+  /* ?attract=<seconds> fast-forwards the demo before the first frame is drawn.
+     The screen moves at a fortieth of pace, so without this the only moment a
+     render harness can ever photograph is the opening one. */
+  const ff = parseFloat(new URLSearchParams(location.search).get('attract') || '0');
+  for (let i = 0; i < Math.min(4000, ff); i++) attractFrame(1.0);
 }
+/* ?clean=1 strips the whole overlay, so the artwork can be judged on its own. */
+if (new URLSearchParams(location.search).has('clean')) ui.style.display = 'none';
 /*#GAME-END*/
 
 /* --------------------------------- main loop ------------------------------ */
@@ -5731,9 +6349,14 @@ function frame(now) {
   if (!ctxLost) {
     resize();
     gameFrame(dt);
-    // A converged still is finished: re-rendering it would blend un-jittered
-    // frames back in and undo the supersampling, and it burns the GPU forever.
-    if (dirty || G.phase === 'resolve' || accN < ACC_MAX) render(dt);
+    /* A converged still is finished: re-rendering it would blend un-jittered
+       frames back in and undo the supersampling, and it burns the GPU forever.
+       The attract screen opts out of the `resolve` clause entirely -- it is
+       permanently resolving, and it decides for itself when a frame is due. */
+    /* Holding the accumulator keeps accN permanently below ACC_MAX, so the
+       "not converged yet" clause would demand a frame every single time. The
+       attract screen therefore draws on exactly one condition: it asked to. */
+    if (ATT.on ? dirty : (dirty || G.phase === 'resolve' || accN < ACC_MAX)) render(dt);
   }
   requestAnimationFrame(frame);
 }

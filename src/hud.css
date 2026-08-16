@@ -1,5 +1,5 @@
   :root{
-    --ink:#e9edf5; --dim:#8d97ab; --faint:#5c6577;
+    --ink:#e9edf5; --dim:#8d97ab; --faint:#8a94a8;
     --line:rgba(255,255,255,.10);
     --glass:linear-gradient(180deg,rgba(20,24,32,.80),rgba(11,13,19,.86));
     --accent:#7fd8ff;
@@ -63,7 +63,7 @@
   .row{margin:10px 0}
   .row:first-child{margin-top:2px}
   .rhead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px}
-  .rhead label{font:10px/1 var(--mono);letter-spacing:.14em;color:#7e8aa0}
+  .rhead label{font:10px/1 var(--mono);letter-spacing:.14em;color:#98a2b6}
   .rhead b{font:11.5px/1 var(--mono);color:#c8d2e4;font-variant-numeric:tabular-nums;font-weight:500}
   input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:16px;background:transparent;margin:0;cursor:ew-resize;display:block}
   input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;
@@ -79,20 +79,44 @@
 
   .split{display:flex;justify-content:space-between;font:9.5px/1.4 var(--mono);letter-spacing:.09em;color:var(--faint);margin-top:3px}
 
+  /* The buttons are cut from the same material as the prisms: dichroic film,
+     which is why the stops run indigo -> violet -> blue -> cyan -> teal rather
+     than being any one colour. Thin-film interference shifts hue with viewing
+     angle, so the gradient is oversized and slides on hover -- the same band
+     sweep you get tilting a real coated surface. Secondary buttons wear the
+     dark, near-extinguished version of the film so the hierarchy survives. */
   .btn{
     display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#cfd8e8;
-    background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:9px;
-    padding:11px 12px;cursor:pointer;transition:background var(--dur),border-color var(--dur),color var(--dur);
+    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#d8e2f2;
+    background-image:linear-gradient(108deg,
+      #171a35 0%, #1d2050 15%, #2a2360 30%, #3a2a63 43%,
+      #24406b 57%, #1b5b6b 71%, #1d6a63 84%, #191c3c 100%);
+    background-size:210% 100%;background-position:6% 0;
+    border:1px solid var(--line);border-radius:9px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.10), inset 0 -10px 20px -14px rgba(0,0,0,.85);
+    padding:11px 12px;cursor:pointer;
+    transition:background-position .55s ease, border-color var(--dur), color var(--dur),
+               box-shadow var(--dur);
   }
-  .btn:hover{background:rgba(255,255,255,.10);color:#fff}
+  .btn:hover{background-position:62% 0;color:#fff;border-color:rgba(160,210,255,.34)}
   .btn:active{transform:translateY(1px)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(127,216,255,.5)}
   .btn.fire{margin-top:4px}
   .btn.fire[aria-pressed="true"]{background:rgba(255,107,129,.18);border-color:rgba(255,107,129,.6);color:#ffd9df}
-  .btn.commit{margin-top:9px;background:rgba(127,216,255,.15);border-color:rgba(127,216,255,.42);color:#dff4ff}
-  .btn.commit:hover{background:rgba(127,216,255,.25)}
+  /* The one action a first-time visitor should take, in full film. */
+  .btn.primary, .btn.commit{
+    color:#f4faff;text-shadow:0 1px 7px rgba(0,0,0,.6);
+    background-image:linear-gradient(108deg,
+      #2b2f86 0%, #3a35a8 13%, #5b38b4 26%, #8038a4 38%,
+      #3f63d2 53%, #2a9fc8 67%, #2fc3ac 80%, #3552bd 91%, #2b2f86 100%);
+    border-color:rgba(190,232,255,.46);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.34),
+               inset 0 -10px 22px -12px rgba(0,0,0,.75),
+               0 12px 30px -18px rgba(96,72,230,.95);
+  }
+  .btn.primary:hover, .btn.commit:hover{border-color:rgba(214,242,255,.7)}
+  .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);color:#9fb0c8}
 
@@ -114,16 +138,49 @@
   .banner p{margin:9px 0 0;font:11px/1 var(--mono);letter-spacing:.22em;color:var(--dim);text-transform:uppercase}
 
   /* -------------------------------------------------------------- lobby */
-  .veil{position:absolute;inset:0;display:grid;place-items:center;background:rgba(4,5,9,.78);
-        backdrop-filter:blur(7px)}
+  /* There is a match running behind this, so the veil cannot be a sheet of
+     paint. It is a pool of shade centred on the dialog: dense enough under the
+     text to keep it legible, gone by the edges of the frame where the fight
+     is. No backdrop blur -- the whole point of what is behind is thin, sharp
+     beams, and a blur is exactly what destroys them. */
+  .veil{position:absolute;inset:0;display:grid;place-items:center;
+        --vx:50%;
+        background:
+          radial-gradient(52% 64% at var(--vx) 50%,
+            rgba(3,4,8,.93) 0%, rgba(3,4,8,.84) 34%,
+            rgba(3,4,8,.42) 62%, rgba(3,4,8,.10) 82%, rgba(3,4,8,0) 100%),
+          linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
+                          rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
+
+  /* Given room, the dialog moves off the middle and the match gets the rest of
+     the frame. Centring both meant the one thing worth looking at was always
+     directly behind the one thing you have to read. The pool of shade moves
+     with the dialog. */
+  @media (min-width: 1100px){
+    .veil{place-items:center start;padding-left:min(9vw,150px);--vx:26%}
+    /* ...and on the other side when the battle is on the left. At demo zoom the
+       viewport already spans most of the arena, so the camera cannot pan a
+       left-hand fight clear of a left-hand dialog -- it just loses the right
+       half of the field off the edge instead. The side is chosen once, before
+       the first frame, from where the staged fight actually is. */
+    .veil.right{place-items:center end;padding-left:0;padding-right:min(9vw,150px);--vx:74%}
+  }
+
+  /* While the lobby is up, the match furniture belongs to a game the viewer
+     has not joined yet -- it would read as a broken HUD over the demo. */
+  .ui.lobbyup .orders, .ui.lobbyup .roster, .ui.lobbyup .hint,
+  .ui.lobbyup .giz,    .ui.lobbyup .banner {display:none}
   .modal{
-    width:min(430px,calc(100vw - 32px));background:var(--glass);border:1px solid var(--line);
+    width:min(430px,calc(100vw - 32px));border:1px solid var(--line);
+    background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
+    backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
     border-radius:16px;padding:24px;box-shadow:0 40px 90px -30px rgba(0,0,0,.95)
   }
   .modal h1{margin:0 0 3px;font:600 21px/1 var(--sans);letter-spacing:.30em;text-transform:uppercase}
+  .modal .status:empty{display:none}
   .modal .sub{margin:0 0 20px;font:10.5px/1.5 var(--mono);letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
   .modal .fld{margin:12px 0}
-  .modal label{display:block;font:10px/1 var(--mono);letter-spacing:.14em;color:#7e8aa0;margin-bottom:6px}
+  .modal label{display:block;font:10px/1 var(--mono);letter-spacing:.14em;color:#98a2b6;margin-bottom:6px}
   .modal input[type=text]{
     width:100%;font:13px/1 var(--mono);letter-spacing:.10em;color:var(--ink);
     background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:8px;padding:11px 12px

@@ -1,0 +1,18 @@
+# Live-reload overlay for local development.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# The runtime image bakes index.html in at build time, which is right for a
+# deployment and wrong while you are editing: every change otherwise needs a
+# rebuild before it appears at the LAN address. This mounts the working copy
+# over the baked one, read-only, so a browser refresh is enough.
+#
+# The server sends `cache-control: no-store`, so an ordinary reload picks up
+# the change -- no hard refresh needed. Remember that index.html is generated:
+# run `node build.js` after editing anything in src/.
+
+services:
+  prisma:
+    volumes:
+      - ./index.html:/app/index.html:ro
+      - ./src:/app/src:ro
