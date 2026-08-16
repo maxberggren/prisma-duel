@@ -147,8 +147,8 @@
         --vx:50%;
         background:
           radial-gradient(52% 64% at var(--vx) 50%,
-            rgba(3,4,8,.93) 0%, rgba(3,4,8,.84) 34%,
-            rgba(3,4,8,.42) 62%, rgba(3,4,8,.10) 82%, rgba(3,4,8,0) 100%),
+            rgba(3,4,8,.86) 0%, rgba(3,4,8,.74) 34%,
+            rgba(3,4,8,.34) 62%, rgba(3,4,8,.08) 82%, rgba(3,4,8,0) 100%),
           linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
                           rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
 
@@ -176,7 +176,9 @@
     background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
     backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
     border-radius:16px;padding:24px;
-    box-shadow:0 40px 90px -30px rgba(0,0,0,.95), 0 0 46px -12px rgba(96,86,220,.42)
+    /* Lifted off the scene, not dropped into a pit: the card sits over a live
+       match, and a heavy shadow made it look pasted on rather than floating. */
+    box-shadow:0 20px 52px -34px rgba(0,0,0,.68), 0 0 34px -16px rgba(96,86,220,.26)
   }
   /* A dichroic rim, the same film the prisms and the buttons are cut from: a
      gradient painted into a one-pixel ring by masking out the middle. A flat

@@ -155,8 +155,8 @@
         --vx:50%;
         background:
           radial-gradient(52% 64% at var(--vx) 50%,
-            rgba(3,4,8,.93) 0%, rgba(3,4,8,.84) 34%,
-            rgba(3,4,8,.42) 62%, rgba(3,4,8,.10) 82%, rgba(3,4,8,0) 100%),
+            rgba(3,4,8,.86) 0%, rgba(3,4,8,.74) 34%,
+            rgba(3,4,8,.34) 62%, rgba(3,4,8,.08) 82%, rgba(3,4,8,0) 100%),
           linear-gradient(180deg, rgba(3,4,8,.30), rgba(3,4,8,0) 14%,
                           rgba(3,4,8,0) 86%, rgba(3,4,8,.30))}
 
@@ -184,7 +184,9 @@
     background:linear-gradient(180deg,rgba(20,24,32,.62),rgba(11,13,19,.70));
     backdrop-filter:blur(22px) saturate(125%);-webkit-backdrop-filter:blur(22px) saturate(125%);
     border-radius:16px;padding:24px;
-    box-shadow:0 40px 90px -30px rgba(0,0,0,.95), 0 0 46px -12px rgba(96,86,220,.42)
+    /* Lifted off the scene, not dropped into a pit: the card sits over a live
+       match, and a heavy shadow made it look pasted on rather than floating. */
+    box-shadow:0 20px 52px -34px rgba(0,0,0,.68), 0 0 34px -16px rgba(96,86,220,.26)
   }
   /* A dichroic rim, the same film the prisms and the buttons are cut from: a
      gradient painted into a one-pixel ring by masking out the middle. A flat
@@ -5800,23 +5802,29 @@ const ATT = {
      visibly alive. */
   scale: 0.095,        // simulated seconds per real second
   evLift: 1.26,        // grade up to pay back what the veil takes
-  zoomMin: 1.32, zoomMax: 2.9,  // wide enough to hold the engagement, tight enough to read
+  /* Zoom and framing radius are two ends of one constraint: at this fit
+     scale a subject of radius r needs zoom <= ~1.24/r to clear the frame
+     vertically. Setting them independently is how the camera ended up at 2.45
+     holding a 1.30 radius and putting every ship outside the picture. */
+  zoomMin: 2.4, zoomMax: 3.6,   // close enough to read hulls, muzzle flare and debris
   minR: 0.30,          // never push closer than this, however tight the action
-  maxR: 1.25,          // and never pull back further than this: crop the long shot
+  maxR: 0.52,          // and never pull back further than this: crop the long shot
   fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
-  boom: null, boomAge: 1e9, boomHold: 26, boomR: 1.9,    // hold on a kill this long
+  boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.46,   // hold on a kill this long
   watch: -1,           // ship staging says is about to die
-  crowdR: 2.9,         // how close counts as "in the same fight"
+  crowdR: 1.35,        // how close counts as "in the same fight"
   tooClose: 0.85,      // hulls nearer than this read as a collision, not a duel
   standoff: 1.45,      // range demo pilots try to hold while charging
   rangeIdeal: 2.4,     // how far away the killing shot ideally comes from
-  wRange: 1.5, wGlassShot: 9.0, wApart: 2.6, wBeams: 2.2,
+  wRange: 1.0, wGlassShot: 9.0, wApart: 7.0, wBeams: 2.2,
+  idealGap: 0.95,      // the gap that frames two fighters best at demo zoom
   wantAlive: 4,        // fighters that must still be up when the viewer arrives
   castTries: 4,        // arenas auditioned for the opening
   castGood: 22.0,      // score at which we stop looking
-  crowdMaxR: 2.95,     // and how far back the camera may go to hold them
+  crowdMaxR: 0.52,     // and how far back the camera may go to hold them
+  watchR: 0.44,        // how tight to sit on the ship that is about to go
   leadIn: 3.2,         // seconds of firefight before the kill lands
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
@@ -6020,16 +6028,24 @@ function attractCandidate(lead) {
        and how much of that light is inside glass. */
     const al = G.state.ships.filter(sh => sh.alive);
     let tight = Infinity;
+    /* Per-ship nearest neighbour as well as the global tightest pair. Scoring
+       on the global one cast duels happening nowhere near the ship the camera
+       was going to be pointed at, so the framed pair was still a lone ship. */
+    const nn = G.state.ships.map(() => Infinity);
     for (let x = 0; x < al.length; x++)
-      for (let y = x + 1; y < al.length; y++)
-        tight = Math.min(tight, Math.hypot(al[x].x - al[y].x, al[x].y - al[y].y));
+      for (let y = x + 1; y < al.length; y++) {
+        const d = Math.hypot(al[x].x - al[y].x, al[x].y - al[y].y);
+        tight = Math.min(tight, d);
+        nn[al[x].idx] = Math.min(nn[al[x].idx], d);
+        nn[al[y].idx] = Math.min(nn[al[y].idx], d);
+      }
     let glass = 0, tot = 0;
     for (let q = 0; q < segCount; q++) {
       const w = q * 12;
       if (!(segData[w + 7] > 0)) continue;
       tot++; if (segData[w + 9] > 0.5) glass++;
     }
-    hist.push({ tight, beams: al.filter(sh => sh.firing).length,
+    hist.push({ tight, nn, beams: al.filter(sh => sh.firing).length,
                 glass: tot ? glass / tot : 0, alive: al.length });
     if (hist.length > lead + 1) hist.shift();
 
@@ -6048,7 +6064,8 @@ function attractCandidate(lead) {
           (open.tight < ATT.tooClose ? -8 : 0)                 // never nose to nose
         + (open.alive < ATT.wantAlive ? -14 : 0)               // and never a nearly-over battle
         + open.alive * 1.7
-        + Math.min(open.tight, 2.2) * ATT.wApart
+        + (1 - Math.min(1, Math.abs((open.nn[k] === Infinity ? 9 : open.nn[k])
+                                    - ATT.idealGap) / 0.85)) * ATT.wApart
         + Math.min(open.beams, 3) * ATT.wBeams
         + open.glass * ATT.wGlassShot
         + crowd * 0.8
@@ -6145,7 +6162,14 @@ function attractSubject() {
   /* A ship coming apart outranks anything else on the field. It is the most
      dramatic thing the renderer does and it does not last long. */
   if (ATT.boom && ATT.boomAge < ATT.boomHold) {
-    return { x: ATT.boom.x, y: ATT.boom.y, r: ATT.boomR, id: 'boom' + ATT.boom.idx };
+    /* Pull just wide enough to keep the nearest survivor in shot. A fireball
+       alone fills the frame with fire and tells you nothing about the fight
+       that caused it. */
+    let near = Infinity;
+    for (const o of G.state.ships)
+      if (o.alive) near = Math.min(near, Math.hypot(o.x - ATT.boom.x, o.y - ATT.boom.y));
+    const r = clamp(Math.max(ATT.boomR, near < Infinity ? near * 0.62 : 0), ATT.minR, ATT.maxR);
+    return { x: ATT.boom.x, y: ATT.boom.y, r, id: 'boom' + ATT.boom.idx };
   }
   /* Staging has named the ship that is about to die. Sit on it now, so when it
      goes up the camera is already there and the payoff needs no cut. Framed
@@ -6153,21 +6177,20 @@ function attractSubject() {
   if (ATT.watch >= 0) {
     const v = G.state.ships[ATT.watch];
     if (v && v.alive) {
-      /* Frame the whole engagement around the doomed ship -- everyone close
-         enough to be part of the same fight -- rather than just the pair. */
-      let x0 = v.x, x1 = v.x, y0 = v.y, y1 = v.y;
+      /* Close on the ship that is about to die, leaning into the shot that is
+         killing it so the beam enters the frame rather than appearing at the
+         hull. Holding both duellists would mean zooming back out to about
+         thirty-pixel ships -- fighters engage at a unit or more, which is
+         simply wider than a frame this close can be. Scale wins: what you see
+         is a hull, its muzzle flare, the beam on it, and then the break-up. */
+      let sx = 0, sy = 0, best = Infinity;
       for (const o of G.state.ships) {
-        if (!o.alive || o === v) continue;
-        if (Math.hypot(o.x - v.x, o.y - v.y) > ATT.crowdR) continue;
-        x0 = Math.min(x0, o.x); x1 = Math.max(x1, o.x);
-        y0 = Math.min(y0, o.y); y1 = Math.max(y1, o.y);
+        if (!o.alive || o === v || !o.firing) continue;
+        const d = Math.hypot(o.x - v.x, o.y - v.y);
+        if (d < best) { best = d; sx = (o.x - v.x) / d; sy = (o.y - v.y) / d; }
       }
-      const cx = (x0 + x1) * 0.5, cy = (y0 + y1) * 0.5;
-      // keep the victim itself comfortably inside, it is where the payoff lands
-      const r = clamp(Math.max((x1 - x0) * 0.5, (y1 - y0) * 0.5,
-                               Math.hypot(v.x - cx, v.y - cy) + 0.30, ATT.boomR),
-                      ATT.minR, ATT.crowdMaxR);
-      return { x: cx * 0.62 + v.x * 0.38, y: cy * 0.62 + v.y * 0.38, r, id: 'watch' + ATT.watch };
+      const lean = best < Infinity ? ATT.watchR * 0.55 : 0;
+      return { x: v.x + sx * lean, y: v.y + sy * lean, r: ATT.watchR, id: 'watch' + ATT.watch };
     }
     ATT.watch = -1;
   }
