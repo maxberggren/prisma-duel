@@ -15,6 +15,10 @@ const PLAYERS = [{ id: 0, name: 'A' }, { id: 1, name: 'B' }, { id: 2, name: 'C' 
 /** Play `turns` turns with a scripted, deterministic move generator. */
 function playout(seed, turns, moveGen, hitGen) {
   const st = C.makeState(PLAYERS, seed);
+  /* This test is about the determinism of the simulation, not about terrain.
+     Terrain is fatal now, and a chain where everyone is dead by turn two has
+     nothing left to diverge, so the ships fly in clear air. */
+  st.arena.prisms.length = 0;
   const hashes = [];
   for (let t = 0; t < turns; t++) {
     const moves = {};
@@ -36,10 +40,12 @@ function playout(seed, turns, moveGen, hitGen) {
    the middle of the arena, because flying into a wall or a prism is now fatal
    and a script that kills everyone by turn 3 has nothing left to diverge. */
 const script = (t, s) => {
+  /* Orbit the middle rather than steering into it: four ships all converging on
+     one point collide, and dead ships have no divergence left to measure. */
   const toMid = Math.atan2(C.RULES.ARENA_H * 0.5 - s.y, C.RULES.ARENA_W * 0.5 - s.x);
   return {
-    heading: toMid + Math.sin(t * 0.7 + s.idx) * 0.45,
-    speed: C.RULES.SPEED_MAX * (0.35 + 0.15 * Math.sin(t * 0.4 + s.idx * 1.3)),
+    heading: toMid + Math.PI * 0.5 + Math.sin(t * 0.7 + s.idx) * 0.25,
+    speed: C.RULES.SPEED_MAX * (0.18 + 0.08 * Math.sin(t * 0.4 + s.idx * 1.3)),
     thrust: 0.3 + 0.4 * ((t + s.idx) % 3) / 2,
     fire: (t + s.idx) % 4 === 0,
   };
@@ -57,8 +63,13 @@ console.log('\ndeterminism');
   ok('the state actually evolves (hashes are not constant)',
      new Set(a.hashes).size > 6, `${new Set(a.hashes).size} distinct`);
 
-  const c = playout(9002, 12, script, hits);
-  ok('a different arena seed diverges', a.hashes.join(',') !== c.hashes.join(','));
+  /* The playouts above fly in cleared air, so the arena seed cannot show up in
+     their hashes. Test what the seed actually governs, directly. */
+  const arenaA = C.makeState(PLAYERS, 9001).arena, arenaB = C.makeState(PLAYERS, 9002).arena;
+  ok('a different arena seed gives a different arena',
+     JSON.stringify(arenaA.prisms) !== JSON.stringify(arenaB.prisms));
+  ok('...and the same seed gives the same arena',
+     JSON.stringify(arenaA.prisms) === JSON.stringify(C.makeState(PLAYERS, 9001).arena.prisms));
 
   const d = playout(9001, 12, (t, s) => {
     const m = script(t, s);

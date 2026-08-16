@@ -355,11 +355,11 @@ const RULES = {
   TURN_SECONDS: 4.0,        // real seconds a resolution animation takes
   PLAN_SECONDS: 25,         // planning window before the arbiter forces the turn
 
-  SPEED_MAX: 0.380,         // world units per turn at full thrust
+  SPEED_MAX: 0.480,         // world units per turn at full thrust
                             // (the arena is 1.6 wide, so ~7 turns to cross)
   SPEED_MIN: 0.080,         // ships are aircraft: they cannot stop
-  ACCEL: 0.132,             // max change in commanded speed per turn
-  TURN_RATE: 1.15,          // radians per turn at full thrust, low speed
+  ACCEL: 0.165,             // max change in commanded speed per turn
+  TURN_RATE: 1.60,          // radians per turn at full thrust, low speed
   TURN_RATE_SPEED_PENALTY: 0.55,  // fraction of agility lost at max speed
 
   SHIELD_MAX: 100,
@@ -377,7 +377,7 @@ const RULES = {
 
   CHARGE_MAX: 1,
   CHARGE_START: 0.55,       // nobody opens with an alpha strike
-  CHARGE_RATE: 0.34,        // per turn at zero thrust allocation
+  CHARGE_RATE: 0.50,        // per turn at zero thrust allocation
   FIRE_COST: 1,
 
   DEBRIS_PER_KILL: 8,      // one per airframe section, not random shrapnel
@@ -544,11 +544,11 @@ function arenaInset(turn) {
 
 /* ------------------------------------------------- per-ship derived limits */
 function maxSpeedFor(thrust) {
-  return lerp(RULES.SPEED_MAX * 0.42, RULES.SPEED_MAX, clamp(thrust, 0, 1));
+  return lerp(RULES.SPEED_MAX * 0.32, RULES.SPEED_MAX, clamp(thrust, 0, 1));
 }
 function turnRateFor(thrust, speed) {
   const sN = clamp(speed / RULES.SPEED_MAX, 0, 1);
-  const agility = lerp(0.55, 1.0, clamp(thrust, 0, 1));
+  const agility = lerp(0.45, 1.0, clamp(thrust, 0, 1));
   return RULES.TURN_RATE * agility * (1 - RULES.TURN_RATE_SPEED_PENALTY * sN);
 }
 /** Clamp a raw player intent into what the ship can physically do this turn. */
