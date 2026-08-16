@@ -235,8 +235,25 @@
     .roster{width:auto;left:var(--pad);right:var(--pad);flex-direction:row;gap:6px}
     .card{flex:1;min-width:0;padding:7px 8px 8px}
     .card .lbl{display:none}
+    /* Four cards across a phone leaves ~90px each, and "PLANNING" alone is
+       most of that: the status was being clipped mid-word. Let it drop under
+       the callsign instead, and shrink to suit. */
+    .card .top{flex-wrap:wrap;gap:0 6px;margin-bottom:5px}
+    .card .nm{font-size:10.5px;flex:1 1 auto}
+    .card .st{margin-left:0;flex:1 0 100%;font-size:9px;letter-spacing:.06em}
+    .card .you{font-size:9px}
     .orders{right:var(--pad);left:var(--pad);width:auto;top:auto;bottom:var(--pad)}
     .hint{display:none}
+
+    /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
+       it wants a finger's worth of height to grab, without the rail itself
+       getting fatter. */
+    input[type=range]{height:34px}
+    input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}
+    input[type=range]::-moz-range-thumb{width:20px;height:20px}
+    .btn{padding:14px 12px}
+    .obody{padding:12px 13px 14px}
+    .row{margin:12px 0}
   }
   @media (prefers-reduced-motion:reduce){ *{transition-duration:.01ms !important} }
   .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
@@ -3440,12 +3457,31 @@ function updateView() {
    runs to all four edges. The camera clamp keeps it inside the arena, so the
    border stays out of frame until the player zooms out to look for it. */
 const MATCH_OVERSCAN = 1.10;
+let camTouched = false;          // has the player taken the camera over?
 function frameArenaForMatch() {
   cam.zoom = 1; updateView();                    // settle fitScale for this viewport
   const cover = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale);
   cam.zoom = clamp(cover * MATCH_OVERSCAN, ZOOM_MIN, ZOOM_MAX);
-  cam.x = VIEW_W * 0.5; cam.y = VIEW_H * 0.5;
+  /* Centre on your own ship, not on the arena. On a wide screen the covered
+     view is nearly the whole arena and the clamp centres it anyway; on a phone
+     held upright it covers barely a third of the width, and there centring on
+     the arena would routinely open the match with your own fighter off
+     screen. */
+  const me = G.state && G.state.ships[G.selfIdx];
+  cam.x = me ? me.x : VIEW_W * 0.5;
+  cam.y = me ? me.y : VIEW_H * 0.5;
   updateView();
+
+  /* Keep a real margin off the walls. updateView's own clamp stops at exactly
+     halfW, which puts the wall line in the first column of pixels -- and a
+     ship spawns close enough to a wall to pin the camera there every time. */
+  {
+    const hw = W / (2 * viewScale), hh = viewAvailH / (2 * viewScale), m = 0.03;
+    cam.x = (hw + m >= VIEW_W - hw - m) ? VIEW_W * 0.5 : clamp(cam.x, hw + m, VIEW_W - hw - m);
+    cam.y = (hh + m >= VIEW_H - hh - m) ? VIEW_H * 0.5 : clamp(cam.y, hh + m, VIEW_H - hh - m);
+    updateView();
+  }
+  camTouched = false;
 }
 
 /** Zoom about a point given in CSS pixels relative to the canvas. */
@@ -3482,6 +3518,11 @@ function resize() {
   W = w; H = h;
   canvas.width = W; canvas.height = H;
   updateView();
+  /* A rotation, or the orders panel turning into a bottom sheet, changes the
+     shape of the play area -- so the opening framing has to be recomputed, or
+     a phone opens the match framed for a viewport it no longer has. Never once
+     the player has panned or zoomed: that is their view now. */
+  if (!camTouched && !ATT.on && G.state && G.phase !== 'menu') frameArenaForMatch();
   allocTargets(W, H);
   dirty = true;
 }
@@ -5638,6 +5679,7 @@ function aimAtPoint(clientX, clientY) {
 }
 
 canvas.addEventListener('pointerdown', ev => {
+  camTouched = true;              // panning is the player claiming the view
   if (!ev.isPrimary || camDrag) return;
   const forcePan = ev.button === 1 || ev.button === 2 || ev.shiftKey;
   if (ev.button !== 0 && !forcePan) return;
@@ -5669,6 +5711,7 @@ addEventListener('pointercancel', endCamDrag);
 addEventListener('blur', () => endCamDrag());
 
 canvas.addEventListener('wheel', ev => {
+  camTouched = true;
   if (ev.ctrlKey) return;                     // leave browser zoom alone
   ev.preventDefault();
   let d = ev.deltaY;
@@ -5689,6 +5732,7 @@ canvas.addEventListener('touchstart', ev => {
   pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) };
 }, { passive: true });
 canvas.addEventListener('touchmove', ev => {
+  camTouched = true;
   if (!pinch || ev.touches.length !== 2) return;
   const [a, b] = ev.touches;
   const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -6467,6 +6511,16 @@ function attractCamera(dt) {
      zero. Dividing the frame width by it put NaN into the camera and rendered
      the whole arena nowhere -- so wait for a real viewport. */
   if (!W || !(viewScale > 0)) return;
+
+  /* Coverage first, before anything can return early. With nobody firing the
+     director holds the last shot and bails out of this function -- and on a
+     tall phone that left the opening zoom showing dead space past the walls,
+     top and bottom, for as long as the lull lasted. */
+  {
+    const cov = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale) * 1.02;
+    if (cam.zoom < cov) { cam.zoom = cov; updateView(); }
+  }
+
   const subj = attractSubject();
   if (!subj) return;                  // hold the last shot rather than drift to nothing
 
@@ -6489,7 +6543,16 @@ function attractCamera(dt) {
   const need = Math.max(ATT.minR, subj.r) * ATT.margin;
   const fit = Math.min(strip.half, viewAvailH * 0.5) / (fitScale * need);
   const breathe = 1 + ATT.breathe * Math.sin(ATT.camT * ATT.breatheRate);
-  const zTarget = clamp(fit, ATT.zoomMin, ATT.zoomMax) * breathe;
+  /* Never wide enough to see past the walls. On a phone held upright the
+     viewport is far taller than the arena's 16:9, and a zoom chosen only from
+     the subject left dead space above and below the floor -- the start screen
+     framed by its own letterbox. */
+  const cover = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale);
+  /* Covering a tall phone can need more zoom than the crane's own ceiling --
+     3.8 against a limit of 2.9 -- so the ceiling has to give way to the floor,
+     or the clamp quietly hands back a zoom that still shows the walls. */
+  const zLo = Math.max(ATT.zoomMin, cover * 1.02);
+  const zTarget = clamp(fit, zLo, Math.max(ATT.zoomMax, zLo)) * breathe;
 
   /* An instant cut reads as a glitch on a screen this still, and a slow ease
      leaves the camera trailing the action forever. So: a fast push that lands

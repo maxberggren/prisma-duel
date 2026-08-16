@@ -918,6 +918,7 @@ function aimAtPoint(clientX, clientY) {
 }
 
 canvas.addEventListener('pointerdown', ev => {
+  camTouched = true;              // panning is the player claiming the view
   if (!ev.isPrimary || camDrag) return;
   const forcePan = ev.button === 1 || ev.button === 2 || ev.shiftKey;
   if (ev.button !== 0 && !forcePan) return;
@@ -949,6 +950,7 @@ addEventListener('pointercancel', endCamDrag);
 addEventListener('blur', () => endCamDrag());
 
 canvas.addEventListener('wheel', ev => {
+  camTouched = true;
   if (ev.ctrlKey) return;                     // leave browser zoom alone
   ev.preventDefault();
   let d = ev.deltaY;
@@ -969,6 +971,7 @@ canvas.addEventListener('touchstart', ev => {
   pinch = { d: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) };
 }, { passive: true });
 canvas.addEventListener('touchmove', ev => {
+  camTouched = true;
   if (!pinch || ev.touches.length !== 2) return;
   const [a, b] = ev.touches;
   const d = Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -1747,6 +1750,16 @@ function attractCamera(dt) {
      zero. Dividing the frame width by it put NaN into the camera and rendered
      the whole arena nowhere -- so wait for a real viewport. */
   if (!W || !(viewScale > 0)) return;
+
+  /* Coverage first, before anything can return early. With nobody firing the
+     director holds the last shot and bails out of this function -- and on a
+     tall phone that left the opening zoom showing dead space past the walls,
+     top and bottom, for as long as the lull lasted. */
+  {
+    const cov = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale) * 1.02;
+    if (cam.zoom < cov) { cam.zoom = cov; updateView(); }
+  }
+
   const subj = attractSubject();
   if (!subj) return;                  // hold the last shot rather than drift to nothing
 
@@ -1769,7 +1782,16 @@ function attractCamera(dt) {
   const need = Math.max(ATT.minR, subj.r) * ATT.margin;
   const fit = Math.min(strip.half, viewAvailH * 0.5) / (fitScale * need);
   const breathe = 1 + ATT.breathe * Math.sin(ATT.camT * ATT.breatheRate);
-  const zTarget = clamp(fit, ATT.zoomMin, ATT.zoomMax) * breathe;
+  /* Never wide enough to see past the walls. On a phone held upright the
+     viewport is far taller than the arena's 16:9, and a zoom chosen only from
+     the subject left dead space above and below the floor -- the start screen
+     framed by its own letterbox. */
+  const cover = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale);
+  /* Covering a tall phone can need more zoom than the crane's own ceiling --
+     3.8 against a limit of 2.9 -- so the ceiling has to give way to the floor,
+     or the clamp quietly hands back a zoom that still shows the walls. */
+  const zLo = Math.max(ATT.zoomMin, cover * 1.02);
+  const zTarget = clamp(fit, zLo, Math.max(ATT.zoomMax, zLo)) * breathe;
 
   /* An instant cut reads as a glitch on a screen this still, and a slow ease
      leaves the camera trailing the action forever. So: a fast push that lands

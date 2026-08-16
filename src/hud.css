@@ -227,8 +227,25 @@
     .roster{width:auto;left:var(--pad);right:var(--pad);flex-direction:row;gap:6px}
     .card{flex:1;min-width:0;padding:7px 8px 8px}
     .card .lbl{display:none}
+    /* Four cards across a phone leaves ~90px each, and "PLANNING" alone is
+       most of that: the status was being clipped mid-word. Let it drop under
+       the callsign instead, and shrink to suit. */
+    .card .top{flex-wrap:wrap;gap:0 6px;margin-bottom:5px}
+    .card .nm{font-size:10.5px;flex:1 1 auto}
+    .card .st{margin-left:0;flex:1 0 100%;font-size:9px;letter-spacing:.06em}
+    .card .you{font-size:9px}
     .orders{right:var(--pad);left:var(--pad);width:auto;top:auto;bottom:var(--pad)}
     .hint{display:none}
+
+    /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
+       it wants a finger's worth of height to grab, without the rail itself
+       getting fatter. */
+    input[type=range]{height:34px}
+    input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}
+    input[type=range]::-moz-range-thumb{width:20px;height:20px}
+    .btn{padding:14px 12px}
+    .obody{padding:12px 13px 14px}
+    .row{margin:12px 0}
   }
   @media (prefers-reduced-motion:reduce){ *{transition-duration:.01ms !important} }
   .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
