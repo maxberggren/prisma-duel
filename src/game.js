@@ -29,10 +29,6 @@ function mk(tag, attrs) {
   svg.appendChild(e);
   return e;
 }
-/* The reachable envelope: how far you can turn and how fast you can be going
-   by the end of this turn. It is the only visualisation of what the power
-   split actually buys you, which is why it stays. */
-const gEnvelope = mk('path', { fill: 'rgba(127,216,255,.055)', stroke: 'rgba(127,216,255,.20)', 'stroke-width': 1 });
 const gTrackBk = mk('path', { fill: 'none', stroke: 'rgba(0,0,0,.55)', 'stroke-width': 4.5, 'stroke-linecap': 'round' });
 const gTrack = mk('path', { fill: 'none', stroke: '#7fd8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
 const handle = document.createElement('button');
@@ -44,7 +40,7 @@ handle.innerHTML = '<i></i>';
 gizEl.appendChild(handle);
 
 /* ------------------------------------------------------------- orders state */
-const oThr = $('oThr'), oSpd = $('oSpd'), oFire = $('oFire'), oCommit = $('oCommit');
+const oFire = $('oFire'), oCommit = $('oCommit');
 let committed = false;
 
 function legalNow() {
@@ -61,18 +57,20 @@ function syncOrderUI() {
   if (!sh.alive) {
     // a destroyed player keeps watching; the turn no longer waits on them
     $('commitLbl').textContent = 'DESTROYED — SPECTATING';
-    oCommit.disabled = oFire.disabled = oThr.disabled = oSpd.disabled = true;
+    oCommit.disabled = oFire.disabled = true;
     oCommit.classList.remove('done');
     return;
   }
+  /* Both figures come from the one drag: thrust is what the course costs, and
+     recharge is what is left over. Shown, never set. */
   const thr = G.aim.thrust;
-  oThr.value = thr; oThr.style.setProperty('--p', thr);
-  $('vThr').textContent = `${Math.round((1 - thr) * 100)} / ${Math.round(thr * 100)}`;
-
-  const maxS = maxSpeedFor(thr);
-  const f = clamp((G.aim.speed - RULES.SPEED_MIN) / (maxS - RULES.SPEED_MIN), 0, 1);
-  oSpd.value = f; oSpd.style.setProperty('--p', f);
-  $('vSpd').textContent = Math.round(G.aim.speed / RULES.SPEED_MAX * 100) + '%';
+  $('vThr').textContent = Math.round(thr * 100) + '%';
+  const gain = RULES.CHARGE_RATE * (1 - thr);
+  const room = Math.max(0, RULES.CHARGE_MAX - sh.charge);
+  $('vRech').textContent = sh.charge >= RULES.CHARGE_MAX - 1e-9
+    ? 'FULL' : '+' + Math.round(Math.min(gain, room) * 100) + '%';
+  $('mThr').style.width = Math.round(thr * 100) + '%';
+  $('mThr').style.background = thrustInk(thr);
 
   const charged = sh.charge >= RULES.FIRE_COST - 1e-9;
   oFire.disabled = !charged || committed;
@@ -82,10 +80,26 @@ function syncOrderUI() {
     ? `CHARGING ${Math.round(sh.charge * 100)}%`
     : (G.aim.fire ? 'LASER ARMED' : 'ARM LASER');
 
-  oThr.disabled = oSpd.disabled = committed;
-  oCommit.disabled = committed;
+  /* Nothing to commit while the turn is running: the button stayed live
+     through the whole resolve, so it read as an action that does nothing. */
+  const planning = G.phase === 'plan';
+  oFire.disabled = oFire.disabled || !planning;
+  oCommit.disabled = committed || !planning;
   oCommit.classList.toggle('done', committed);
-  $('commitLbl').textContent = committed ? 'ORDERS SENT — WAITING' : 'COMMIT ORDERS';
+  $('commitLbl').textContent = !planning ? 'RESOLVING'
+                             : committed ? 'ORDERS SENT' : 'COMMIT';
+}
+
+/* The colour of what a course costs: cool and cheap when you are barely
+   moving and the capacitor is filling, hot when the run is eating the charge.
+   The course line on the arena and the meter in the panel use the same ramp,
+   so the line itself tells you the split without reading anything. */
+function thrustInk(t) {
+  const k = clamp(t, 0, 1);
+  const r = Math.round(lerp(90, 255, k * k));
+  const g = Math.round(lerp(214, 138, k));
+  const b = Math.round(lerp(255, 92, Math.sqrt(k)));
+  return `rgb(${r},${g},${b})`;
 }
 
 /* --------------------------------------------------------------- the roster */
@@ -129,23 +143,6 @@ function drawGizmo() {
   if (sig === gizSig) return;
   gizSig = sig;
 
-  // the reachable envelope for this power split
-  const rate = turnRateFor(m.thrust, sh.speed);
-  const sMin = clamp(sh.speed - RULES.ACCEL, RULES.SPEED_MIN, RULES.SPEED_MAX);
-  const sMax = clamp(sh.speed + RULES.ACCEL, RULES.SPEED_MIN, maxSpeedFor(m.thrust));
-  let d = '';
-  for (let k = 0; k <= 24; k++) {
-    const a = sh.heading + lerp(-rate, rate, k / 24);
-    const p = w2s(sh.x + Math.cos(a) * sMax, sh.y + Math.sin(a) * sMax);
-    d += (k ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
-  }
-  for (let k = 24; k >= 0; k--) {
-    const a = sh.heading + lerp(-rate, rate, k / 24);
-    const p = w2s(sh.x + Math.cos(a) * sMin, sh.y + Math.sin(a) * sMin);
-    d += 'L' + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
-  }
-  gEnvelope.setAttribute('d', d + 'Z');
-
   // the predicted track, from the very same integrator the sim uses
   const path = integratePath(sh, m, arena.w, arena.h, arena.prisms, (G.state && G.state.inset) || 0);
   let t = '';
@@ -154,6 +151,10 @@ function drawGizmo() {
     t += (k ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
   }
   gTrackBk.setAttribute('d', t); gTrack.setAttribute('d', t);
+  /* The line is the readout: cool when the course is cheap and the capacitor
+     is filling, hot when the run is eating the charge. */
+  gTrack.setAttribute('stroke', thrustInk(m.thrust));
+  gTrack.setAttribute('stroke-width', (2 + m.thrust * 1.4).toFixed(2));
 
   const end = w2s(path[RULES.SUBSTEPS].x, path[RULES.SUBSTEPS].y);
   handle.style.left = end.x + 'px';
@@ -669,7 +670,10 @@ function botOrders(sh) {
      bot that kills itself — measured, 30 of 32 deaths were crashes. Candidate
      courses are tested through the very same integrator the simulation uses,
      so the avoidance is exactly as accurate as the rules are. */
-  return avoidObstacles(sh, { heading: want, speed, thrust, fire });
+  /* Bots buy their course the same way the player does now: thrust is what
+     the commanded speed costs, not a separate dial. Leaving them on the old
+     two-dial model would have them paying for thrust they cannot spend. */
+  return avoidObstacles(sh, { heading: want, speed, thrust: thrustFor(speed), fire });
 }
 
 function avoidObstacles(sh, move) {
@@ -886,7 +890,8 @@ addEventListener('pointermove', ev => {
   const p = s2w(ev.clientX, ev.clientY);
   const dx = p.x - sh.x, dy = p.y - sh.y;
   G.aim.heading = Math.atan2(dy, dx);
-  G.aim.speed = clamp(Math.hypot(dx, dy), RULES.SPEED_MIN, maxSpeedFor(G.aim.thrust));
+  G.aim.speed = clamp(Math.hypot(dx, dy), RULES.SPEED_MIN, RULES.SPEED_MAX);
+  G.aim.thrust = thrustFor(G.aim.speed);      // the drag pays for itself
   syncOrderUI(); gizSig = ''; dirty = true;
 });
 function endDrag(ev) {
@@ -984,24 +989,6 @@ canvas.addEventListener('touchmove', ev => {
   ev.preventDefault();
 }, { passive: false });
 canvas.addEventListener('touchend', () => { pinch = null; }, { passive: true });
-
-/* sliders */
-function bindRange(el, get, set) {
-  const upd = () => { set(parseFloat(el.value)); syncOrderUI(); gizSig = ''; dirty = true; };
-  el.addEventListener('input', upd);
-}
-bindRange(oThr, () => G.aim.thrust, v => {
-  G.aim.thrust = v;
-  G.aim.speed = Math.min(G.aim.speed, maxSpeedFor(v));
-});
-bindRange(oSpd, () => G.aim.speed, v => {
-  G.aim.speed = lerp(RULES.SPEED_MIN, maxSpeedFor(G.aim.thrust), v);
-});
-oFire.addEventListener('click', () => {
-  if (oFire.disabled) return;
-  G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true;
-});
-oCommit.addEventListener('click', commitOrders);
 
 addEventListener('keydown', ev => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;

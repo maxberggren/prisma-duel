@@ -11,27 +11,25 @@
     </header>
     <div class="obody">
 
-      <div class="row">
-        <div class="rhead"><label for="oThr">POWER SPLIT</label><b id="vThr">50 / 50</b></div>
-        <input id="oThr" type="range" min="0" max="1" step="0.01" value="0.5"
-               aria-describedby="dThr">
-        <div class="split"><span>RECHARGE</span><span>THRUST</span></div>
-        <span id="dThr" class="sr" hidden>Thrust buys speed and agility; the remainder recharges the laser.</span>
+      <!-- One control, and it is out on the arena: how far you drag the course
+           handle sets your speed, and speed is bought from the same power the
+           capacitor wants. There is nothing here to set, only what it costs. -->
+      <div class="split2" aria-live="polite">
+        <div class="fig"><span class="k">THRUST</span><b id="vThr">--</b></div>
+        <div class="fig"><span class="k">RECHARGE</span><b id="vRech">--</b></div>
       </div>
+      <div class="meter"><i id="mThr"></i></div>
+      <p id="dSplit" class="sr">Drag the course handle on the arena: further is faster,
+         and speed is taken from the laser's recharge.</p>
 
-      <div class="row">
-        <div class="rhead"><label for="oSpd">THROTTLE</label><b id="vSpd">--</b></div>
-        <input id="oSpd" type="range" min="0" max="1" step="0.01" value="0.5" aria-describedby="dSpd">
-        <span id="dSpd" class="sr" hidden>Commanded speed for the coming turn, limited by your power split.</span>
+      <div class="two">
+        <button class="btn fire" id="oFire" type="button" aria-pressed="false">
+          <span id="fireLbl">ARM LASER</span><span class="kbd">F</span>
+        </button>
+        <button class="btn commit" id="oCommit" type="button">
+          <span id="commitLbl">COMMIT</span><span class="kbd">↵</span>
+        </button>
       </div>
-
-      <button class="btn fire" id="oFire" type="button" aria-pressed="false">
-        <span id="fireLbl">ARM LASER</span><span class="kbd">F</span>
-      </button>
-
-      <button class="btn commit" id="oCommit" type="button">
-        <span id="commitLbl">COMMIT ORDERS</span><span class="kbd">↵</span>
-      </button>
     </div>
   </section>
 
@@ -41,7 +39,7 @@
   <div class="banner" id="banner" style="opacity:0"><h2 id="bannerT"></h2><p id="bannerS"></p></div>
 
   <div class="hint" id="hint">
-    <b>Drag</b> the handle to set your course · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>Drag</b> arena to pan · <b>0</b> reset view
+    <b>Drag</b> the handle: further is faster, and speed is taken from your recharge · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>0</b> reset view
   </div>
 
   <!-- lobby -->

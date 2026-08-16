@@ -85,7 +85,20 @@
   input[type=range]:focus-visible{outline:none}
   input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(127,216,255,.55)}
 
-  .split{display:flex;justify-content:space-between;font:9.5px/1.4 var(--mono);letter-spacing:.09em;color:var(--faint);margin-top:3px}
+  /* What the course costs. Two figures and a bar -- nothing to set here, the
+     only control is the drag out on the arena. */
+  .split2{display:flex;gap:10px;margin:2px 0 8px}
+  .split2 .fig{flex:1;min-width:0}
+  .split2 .k{display:block;font:9.5px/1.5 var(--mono);letter-spacing:.12em;color:var(--faint)}
+  .split2 b{font:15px/1.2 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+  .split2 .fig:last-child b{color:var(--ok)}
+  .meter{height:4px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden;margin-bottom:11px}
+  .meter > i{display:block;height:100%;width:50%;border-radius:2px;background:var(--accent);
+             transition:width .12s linear,background .12s linear}
+  .two{display:flex;gap:8px}
+  .two .btn{flex:1;min-width:0}
+  .two .btn.fire{margin-top:0}
+  .two .btn.commit{margin-top:0}
 
   /* The buttons are cut from the same material as the prisms: dichroic film,
      which is why the stops run indigo -> violet -> blue -> cyan -> teal rather
@@ -218,7 +231,10 @@
   .status{margin-top:14px;font:10.5px/1.5 var(--mono);letter-spacing:.06em;color:var(--dim);min-height:1.5em}
   .status.err{color:var(--bad)}
 
-  .giz{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  /* Under the panel. The handle is dragged around the arena and would
+     otherwise sail over the top of the orders card, including over COMMIT. */
+  .giz{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:1}
+  .orders,.roster,.veil{z-index:2}
   .giz.idle{opacity:0;transition:opacity .5s ease .2s}
   .giz svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .hnd{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border:0;padding:0;
@@ -248,6 +264,19 @@
     /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
        it wants a finger's worth of height to grab, without the rail itself
        getting fatter. */
+    /* The start screen sits at the bottom on a phone, where a thumb is, and
+       leaves the top two thirds of the glass to the match running behind it. */
+    .veil{place-items:end center;padding:0 0 var(--pad);--vx:50%;
+          background:
+            radial-gradient(120% 52% at 50% 108%,
+              rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
+              rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
+            linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
+    .modal{width:calc(100vw - 20px);padding:18px}
+    .modal h1{font-size:19px}
+    .modal .sub{margin-bottom:14px}
+    .modal .fld{margin:9px 0}
+
     input[type=range]{height:34px}
     input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}
     input[type=range]::-moz-range-thumb{width:20px;height:20px}
@@ -278,27 +307,25 @@
     </header>
     <div class="obody">
 
-      <div class="row">
-        <div class="rhead"><label for="oThr">POWER SPLIT</label><b id="vThr">50 / 50</b></div>
-        <input id="oThr" type="range" min="0" max="1" step="0.01" value="0.5"
-               aria-describedby="dThr">
-        <div class="split"><span>RECHARGE</span><span>THRUST</span></div>
-        <span id="dThr" class="sr" hidden>Thrust buys speed and agility; the remainder recharges the laser.</span>
+      <!-- One control, and it is out on the arena: how far you drag the course
+           handle sets your speed, and speed is bought from the same power the
+           capacitor wants. There is nothing here to set, only what it costs. -->
+      <div class="split2" aria-live="polite">
+        <div class="fig"><span class="k">THRUST</span><b id="vThr">--</b></div>
+        <div class="fig"><span class="k">RECHARGE</span><b id="vRech">--</b></div>
       </div>
+      <div class="meter"><i id="mThr"></i></div>
+      <p id="dSplit" class="sr">Drag the course handle on the arena: further is faster,
+         and speed is taken from the laser's recharge.</p>
 
-      <div class="row">
-        <div class="rhead"><label for="oSpd">THROTTLE</label><b id="vSpd">--</b></div>
-        <input id="oSpd" type="range" min="0" max="1" step="0.01" value="0.5" aria-describedby="dSpd">
-        <span id="dSpd" class="sr" hidden>Commanded speed for the coming turn, limited by your power split.</span>
+      <div class="two">
+        <button class="btn fire" id="oFire" type="button" aria-pressed="false">
+          <span id="fireLbl">ARM LASER</span><span class="kbd">F</span>
+        </button>
+        <button class="btn commit" id="oCommit" type="button">
+          <span id="commitLbl">COMMIT</span><span class="kbd">↵</span>
+        </button>
       </div>
-
-      <button class="btn fire" id="oFire" type="button" aria-pressed="false">
-        <span id="fireLbl">ARM LASER</span><span class="kbd">F</span>
-      </button>
-
-      <button class="btn commit" id="oCommit" type="button">
-        <span id="commitLbl">COMMIT ORDERS</span><span class="kbd">↵</span>
-      </button>
     </div>
   </section>
 
@@ -308,7 +335,7 @@
   <div class="banner" id="banner" style="opacity:0"><h2 id="bannerT"></h2><p id="bannerS"></p></div>
 
   <div class="hint" id="hint">
-    <b>Drag</b> the handle to set your course · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>Drag</b> arena to pan · <b>0</b> reset view
+    <b>Drag</b> the handle: further is faster, and speed is taken from your recharge · <b>F</b> arms · <b>Enter</b> commits · <b>Scroll</b> zoom · <b>0</b> reset view
   </div>
 
   <!-- lobby -->
@@ -493,7 +520,7 @@ const RULES = {
      ships died on terrain first. With the crash radius cut to the hull, they
      survive to ram instead, and at 62 that ended most matches in mutual
      destruction. It hurts; it no longer settles the match by itself. */
-  COLLIDE_DMG: 21,
+  COLLIDE_DMG: 13,
 
   /* The walls close in. Without it two cautious pilots can circle forever —
      measured: a bot duel stalemated for 85 turns with both shields pinned at
@@ -678,10 +705,23 @@ function arenaInset(turn) {
 function maxSpeedFor(thrust) {
   return lerp(RULES.SPEED_MAX * 0.32, RULES.SPEED_MAX, clamp(thrust, 0, 1));
 }
+/* The inverse: the least thrust that will carry this speed. With the two
+   sliders gone, thrust is no longer set -- it is what the commanded speed
+   costs, and the remainder is what the capacitor gets. */
+function thrustFor(speed) {
+  const lo = RULES.SPEED_MAX * 0.32, hi = RULES.SPEED_MAX;
+  return clamp((speed - lo) / (hi - lo), 0, 1);
+}
+/* Agility comes from how fast you are going, and nothing else. It used to be
+   bought with thrust as well, which cancelled out once thrust stopped being a
+   separate control: with thrust derived from the commanded speed, the two
+   terms moved in opposite directions and the turn rate came out flat across
+   the whole range -- a slow ship turned no tighter than a fast one, which is
+   both wrong to fly and pointless to choose. Now a short course really is the
+   tight one, and that is the same drag that fills the capacitor. */
 function turnRateFor(thrust, speed) {
   const sN = clamp(speed / RULES.SPEED_MAX, 0, 1);
-  const agility = lerp(0.45, 1.0, clamp(thrust, 0, 1));
-  return RULES.TURN_RATE * agility * (1 - RULES.TURN_RATE_SPEED_PENALTY * sN);
+  return RULES.TURN_RATE * (1 - RULES.TURN_RATE_SPEED_PENALTY * sN);
 }
 /** Clamp a raw player intent into what the ship can physically do this turn. */
 function legaliseMove(ship, move) {
@@ -3414,7 +3454,11 @@ let viewScale = 1, viewOffX = 0, viewOffY = 0;
    shaders, the gizmo, pointer picking — reads viewScale/viewOffX/viewOffY, so
    they all follow the camera for free. */
 const cam = { zoom: 1, x: VIEW_W * 0.5, y: VIEW_H * 0.5 };
-const ZOOM_MIN = 0.85, ZOOM_MAX = 6;
+/* A phone shows a fraction of the arena at cover framing, so the useful zoom
+   range there runs much further in than a desktop's -- close enough to line a
+   shot up through a crystal with a thumb. */
+const ZOOM_MIN = 0.85;
+const ZOOM_MAX = (typeof innerWidth === 'number' && innerWidth < 760) ? 14 : 6;
 let fitScale = 1, viewAvailH = 1;
 
 /* On narrow screens the control panel becomes a bottom sheet that covers the
@@ -4790,10 +4834,6 @@ function mk(tag, attrs) {
   svg.appendChild(e);
   return e;
 }
-/* The reachable envelope: how far you can turn and how fast you can be going
-   by the end of this turn. It is the only visualisation of what the power
-   split actually buys you, which is why it stays. */
-const gEnvelope = mk('path', { fill: 'rgba(127,216,255,.055)', stroke: 'rgba(127,216,255,.20)', 'stroke-width': 1 });
 const gTrackBk = mk('path', { fill: 'none', stroke: 'rgba(0,0,0,.55)', 'stroke-width': 4.5, 'stroke-linecap': 'round' });
 const gTrack = mk('path', { fill: 'none', stroke: '#7fd8ff', 'stroke-width': 2, 'stroke-linecap': 'round' });
 const handle = document.createElement('button');
@@ -4805,7 +4845,7 @@ handle.innerHTML = '<i></i>';
 gizEl.appendChild(handle);
 
 /* ------------------------------------------------------------- orders state */
-const oThr = $('oThr'), oSpd = $('oSpd'), oFire = $('oFire'), oCommit = $('oCommit');
+const oFire = $('oFire'), oCommit = $('oCommit');
 let committed = false;
 
 function legalNow() {
@@ -4822,18 +4862,20 @@ function syncOrderUI() {
   if (!sh.alive) {
     // a destroyed player keeps watching; the turn no longer waits on them
     $('commitLbl').textContent = 'DESTROYED — SPECTATING';
-    oCommit.disabled = oFire.disabled = oThr.disabled = oSpd.disabled = true;
+    oCommit.disabled = oFire.disabled = true;
     oCommit.classList.remove('done');
     return;
   }
+  /* Both figures come from the one drag: thrust is what the course costs, and
+     recharge is what is left over. Shown, never set. */
   const thr = G.aim.thrust;
-  oThr.value = thr; oThr.style.setProperty('--p', thr);
-  $('vThr').textContent = `${Math.round((1 - thr) * 100)} / ${Math.round(thr * 100)}`;
-
-  const maxS = maxSpeedFor(thr);
-  const f = clamp((G.aim.speed - RULES.SPEED_MIN) / (maxS - RULES.SPEED_MIN), 0, 1);
-  oSpd.value = f; oSpd.style.setProperty('--p', f);
-  $('vSpd').textContent = Math.round(G.aim.speed / RULES.SPEED_MAX * 100) + '%';
+  $('vThr').textContent = Math.round(thr * 100) + '%';
+  const gain = RULES.CHARGE_RATE * (1 - thr);
+  const room = Math.max(0, RULES.CHARGE_MAX - sh.charge);
+  $('vRech').textContent = sh.charge >= RULES.CHARGE_MAX - 1e-9
+    ? 'FULL' : '+' + Math.round(Math.min(gain, room) * 100) + '%';
+  $('mThr').style.width = Math.round(thr * 100) + '%';
+  $('mThr').style.background = thrustInk(thr);
 
   const charged = sh.charge >= RULES.FIRE_COST - 1e-9;
   oFire.disabled = !charged || committed;
@@ -4843,10 +4885,26 @@ function syncOrderUI() {
     ? `CHARGING ${Math.round(sh.charge * 100)}%`
     : (G.aim.fire ? 'LASER ARMED' : 'ARM LASER');
 
-  oThr.disabled = oSpd.disabled = committed;
-  oCommit.disabled = committed;
+  /* Nothing to commit while the turn is running: the button stayed live
+     through the whole resolve, so it read as an action that does nothing. */
+  const planning = G.phase === 'plan';
+  oFire.disabled = oFire.disabled || !planning;
+  oCommit.disabled = committed || !planning;
   oCommit.classList.toggle('done', committed);
-  $('commitLbl').textContent = committed ? 'ORDERS SENT — WAITING' : 'COMMIT ORDERS';
+  $('commitLbl').textContent = !planning ? 'RESOLVING'
+                             : committed ? 'ORDERS SENT' : 'COMMIT';
+}
+
+/* The colour of what a course costs: cool and cheap when you are barely
+   moving and the capacitor is filling, hot when the run is eating the charge.
+   The course line on the arena and the meter in the panel use the same ramp,
+   so the line itself tells you the split without reading anything. */
+function thrustInk(t) {
+  const k = clamp(t, 0, 1);
+  const r = Math.round(lerp(90, 255, k * k));
+  const g = Math.round(lerp(214, 138, k));
+  const b = Math.round(lerp(255, 92, Math.sqrt(k)));
+  return `rgb(${r},${g},${b})`;
 }
 
 /* --------------------------------------------------------------- the roster */
@@ -4890,23 +4948,6 @@ function drawGizmo() {
   if (sig === gizSig) return;
   gizSig = sig;
 
-  // the reachable envelope for this power split
-  const rate = turnRateFor(m.thrust, sh.speed);
-  const sMin = clamp(sh.speed - RULES.ACCEL, RULES.SPEED_MIN, RULES.SPEED_MAX);
-  const sMax = clamp(sh.speed + RULES.ACCEL, RULES.SPEED_MIN, maxSpeedFor(m.thrust));
-  let d = '';
-  for (let k = 0; k <= 24; k++) {
-    const a = sh.heading + lerp(-rate, rate, k / 24);
-    const p = w2s(sh.x + Math.cos(a) * sMax, sh.y + Math.sin(a) * sMax);
-    d += (k ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
-  }
-  for (let k = 24; k >= 0; k--) {
-    const a = sh.heading + lerp(-rate, rate, k / 24);
-    const p = w2s(sh.x + Math.cos(a) * sMin, sh.y + Math.sin(a) * sMin);
-    d += 'L' + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
-  }
-  gEnvelope.setAttribute('d', d + 'Z');
-
   // the predicted track, from the very same integrator the sim uses
   const path = integratePath(sh, m, arena.w, arena.h, arena.prisms, (G.state && G.state.inset) || 0);
   let t = '';
@@ -4915,6 +4956,10 @@ function drawGizmo() {
     t += (k ? 'L' : 'M') + p.x.toFixed(1) + ' ' + p.y.toFixed(1);
   }
   gTrackBk.setAttribute('d', t); gTrack.setAttribute('d', t);
+  /* The line is the readout: cool when the course is cheap and the capacitor
+     is filling, hot when the run is eating the charge. */
+  gTrack.setAttribute('stroke', thrustInk(m.thrust));
+  gTrack.setAttribute('stroke-width', (2 + m.thrust * 1.4).toFixed(2));
 
   const end = w2s(path[RULES.SUBSTEPS].x, path[RULES.SUBSTEPS].y);
   handle.style.left = end.x + 'px';
@@ -5430,7 +5475,10 @@ function botOrders(sh) {
      bot that kills itself — measured, 30 of 32 deaths were crashes. Candidate
      courses are tested through the very same integrator the simulation uses,
      so the avoidance is exactly as accurate as the rules are. */
-  return avoidObstacles(sh, { heading: want, speed, thrust, fire });
+  /* Bots buy their course the same way the player does now: thrust is what
+     the commanded speed costs, not a separate dial. Leaving them on the old
+     two-dial model would have them paying for thrust they cannot spend. */
+  return avoidObstacles(sh, { heading: want, speed, thrust: thrustFor(speed), fire });
 }
 
 function avoidObstacles(sh, move) {
@@ -5647,7 +5695,8 @@ addEventListener('pointermove', ev => {
   const p = s2w(ev.clientX, ev.clientY);
   const dx = p.x - sh.x, dy = p.y - sh.y;
   G.aim.heading = Math.atan2(dy, dx);
-  G.aim.speed = clamp(Math.hypot(dx, dy), RULES.SPEED_MIN, maxSpeedFor(G.aim.thrust));
+  G.aim.speed = clamp(Math.hypot(dx, dy), RULES.SPEED_MIN, RULES.SPEED_MAX);
+  G.aim.thrust = thrustFor(G.aim.speed);      // the drag pays for itself
   syncOrderUI(); gizSig = ''; dirty = true;
 });
 function endDrag(ev) {
@@ -5745,24 +5794,6 @@ canvas.addEventListener('touchmove', ev => {
   ev.preventDefault();
 }, { passive: false });
 canvas.addEventListener('touchend', () => { pinch = null; }, { passive: true });
-
-/* sliders */
-function bindRange(el, get, set) {
-  const upd = () => { set(parseFloat(el.value)); syncOrderUI(); gizSig = ''; dirty = true; };
-  el.addEventListener('input', upd);
-}
-bindRange(oThr, () => G.aim.thrust, v => {
-  G.aim.thrust = v;
-  G.aim.speed = Math.min(G.aim.speed, maxSpeedFor(v));
-});
-bindRange(oSpd, () => G.aim.speed, v => {
-  G.aim.speed = lerp(RULES.SPEED_MIN, maxSpeedFor(G.aim.thrust), v);
-});
-oFire.addEventListener('click', () => {
-  if (oFire.disabled) return;
-  G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true;
-});
-oCommit.addEventListener('click', commitOrders);
 
 addEventListener('keydown', ev => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;

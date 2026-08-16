@@ -77,7 +77,20 @@
   input[type=range]:focus-visible{outline:none}
   input[type=range]:focus-visible::-webkit-slider-thumb{box-shadow:0 0 0 3px rgba(127,216,255,.55)}
 
-  .split{display:flex;justify-content:space-between;font:9.5px/1.4 var(--mono);letter-spacing:.09em;color:var(--faint);margin-top:3px}
+  /* What the course costs. Two figures and a bar -- nothing to set here, the
+     only control is the drag out on the arena. */
+  .split2{display:flex;gap:10px;margin:2px 0 8px}
+  .split2 .fig{flex:1;min-width:0}
+  .split2 .k{display:block;font:9.5px/1.5 var(--mono);letter-spacing:.12em;color:var(--faint)}
+  .split2 b{font:15px/1.2 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;font-weight:500}
+  .split2 .fig:last-child b{color:var(--ok)}
+  .meter{height:4px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden;margin-bottom:11px}
+  .meter > i{display:block;height:100%;width:50%;border-radius:2px;background:var(--accent);
+             transition:width .12s linear,background .12s linear}
+  .two{display:flex;gap:8px}
+  .two .btn{flex:1;min-width:0}
+  .two .btn.fire{margin-top:0}
+  .two .btn.commit{margin-top:0}
 
   /* The buttons are cut from the same material as the prisms: dichroic film,
      which is why the stops run indigo -> violet -> blue -> cyan -> teal rather
@@ -210,7 +223,10 @@
   .status{margin-top:14px;font:10.5px/1.5 var(--mono);letter-spacing:.06em;color:var(--dim);min-height:1.5em}
   .status.err{color:var(--bad)}
 
-  .giz{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  /* Under the panel. The handle is dragged around the arena and would
+     otherwise sail over the top of the orders card, including over COMMIT. */
+  .giz{position:absolute;inset:0;overflow:hidden;pointer-events:none;z-index:1}
+  .orders,.roster,.veil{z-index:2}
   .giz.idle{opacity:0;transition:opacity .5s ease .2s}
   .giz svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
   .hnd{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border:0;padding:0;
@@ -240,6 +256,19 @@
     /* Touch targets. A 3px rail with a 12px thumb is a mouse control; on glass
        it wants a finger's worth of height to grab, without the rail itself
        getting fatter. */
+    /* The start screen sits at the bottom on a phone, where a thumb is, and
+       leaves the top two thirds of the glass to the match running behind it. */
+    .veil{place-items:end center;padding:0 0 var(--pad);--vx:50%;
+          background:
+            radial-gradient(120% 52% at 50% 108%,
+              rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
+              rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
+            linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
+    .modal{width:calc(100vw - 20px);padding:18px}
+    .modal h1{font-size:19px}
+    .modal .sub{margin-bottom:14px}
+    .modal .fld{margin:9px 0}
+
     input[type=range]{height:34px}
     input[type=range]::-webkit-slider-thumb{width:20px;height:20px;margin-top:-8.5px}
     input[type=range]::-moz-range-thumb{width:20px;height:20px}

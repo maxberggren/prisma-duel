@@ -100,7 +100,7 @@ console.log('\nmove legalisation');
 console.log('\nagility / thrust tradeoff');
 {
   ok('more thrust => more top speed', C.maxSpeedFor(1) > C.maxSpeedFor(0));
-  ok('more thrust => tighter turn', C.turnRateFor(1, 0.02) > C.turnRateFor(0, 0.02));
+  ok('turn rate no longer depends on thrust', C.turnRateFor(1, 0.02) === C.turnRateFor(0, 0.02));
   ok('more speed => wider turn', C.turnRateFor(1, 0.085) < C.turnRateFor(1, 0.01));
 }
 

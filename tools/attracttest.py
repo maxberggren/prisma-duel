@@ -52,7 +52,11 @@ addEventListener('load', () => setTimeout(() => {
     R.freshMatch    = G.state.turn === 0 && G.state.ships.every(s => s.alive);
     R.botsAreThree  = G.bots.size === 3 && !G.bots.has(0);
     R.planPhase     = G.phase === 'plan';
-    R.ordersIntact  = !!document.querySelector('.orders .obody input');
+    /* The point of this one is that showRematch() empties .obody, so a demo
+       that ran to a finish must not have left the panel gutted. Checks the
+       commit button rather than a slider -- the sliders are gone; the only
+       control now is the course drag on the arena itself. */
+    R.ordersIntact  = !!document.querySelector('.orders .obody #oCommit');
 
     // and the demo must not keep stepping the real match behind our backs
     const t0 = G.state.turn, s0 = G.sub;

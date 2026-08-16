@@ -79,7 +79,7 @@ const RULES = {
      ships died on terrain first. With the crash radius cut to the hull, they
      survive to ram instead, and at 62 that ended most matches in mutual
      destruction. It hurts; it no longer settles the match by itself. */
-  COLLIDE_DMG: 21,
+  COLLIDE_DMG: 13,
 
   /* The walls close in. Without it two cautious pilots can circle forever —
      measured: a bot duel stalemated for 85 turns with both shields pinned at
@@ -264,10 +264,23 @@ function arenaInset(turn) {
 function maxSpeedFor(thrust) {
   return lerp(RULES.SPEED_MAX * 0.32, RULES.SPEED_MAX, clamp(thrust, 0, 1));
 }
+/* The inverse: the least thrust that will carry this speed. With the two
+   sliders gone, thrust is no longer set -- it is what the commanded speed
+   costs, and the remainder is what the capacitor gets. */
+function thrustFor(speed) {
+  const lo = RULES.SPEED_MAX * 0.32, hi = RULES.SPEED_MAX;
+  return clamp((speed - lo) / (hi - lo), 0, 1);
+}
+/* Agility comes from how fast you are going, and nothing else. It used to be
+   bought with thrust as well, which cancelled out once thrust stopped being a
+   separate control: with thrust derived from the commanded speed, the two
+   terms moved in opposite directions and the turn rate came out flat across
+   the whole range -- a slow ship turned no tighter than a fast one, which is
+   both wrong to fly and pointless to choose. Now a short course really is the
+   tight one, and that is the same drag that fills the capacitor. */
 function turnRateFor(thrust, speed) {
   const sN = clamp(speed / RULES.SPEED_MAX, 0, 1);
-  const agility = lerp(0.45, 1.0, clamp(thrust, 0, 1));
-  return RULES.TURN_RATE * agility * (1 - RULES.TURN_RATE_SPEED_PENALTY * sN);
+  return RULES.TURN_RATE * (1 - RULES.TURN_RATE_SPEED_PENALTY * sN);
 }
 /** Clamp a raw player intent into what the ship can physically do this turn. */
 function legaliseMove(ship, move) {
@@ -581,7 +594,7 @@ function stateHash(state) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { RULES, TAU, clamp, lerp, angDelta, mulberry32, makeArena, makeShip,
+  module.exports = { RULES, TAU, clamp, lerp, angDelta, mulberry32, makeArena, makeShip, thrustFor,
                      makeState, legaliseMove, maxSpeedFor, turnRateFor, integratePath, arenaInset,
                      explode, stepDebris, beginTurn,
                      prismSD, pushOutOfPrisms,
