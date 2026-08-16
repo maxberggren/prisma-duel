@@ -1039,6 +1039,7 @@ function newGame(players, seed, selfIdx) {
   G.aim = { heading: me.heading, speed: me.speed, thrust: 0.5, fire: false };
   G.phase = 'plan';
   G.planEnds = performance.now() + RULES.PLAN_SECONDS * 1000;
+  frameArenaForMatch();
   dirty = true;
 }
 
@@ -1274,7 +1275,10 @@ function castRay(ox, oy, dx, dy, col, power, lam, srcIdx, collectHits) {
          interface, Beer-Lambert absorption inside glass, and the arena walls'
          86% reflectance. So a ray that arrives weakened does proportionally
          less damage, which is exactly the intent. */
-      if (collectHits) beamHits.push({ srcIdx, shipIdx: h.idx, depth, dist: d2, power: p });
+      // hx/hy is where it landed and ux/uy the direction it arrived from:
+      // enough for the impact to throw sparks back along the beam
+      if (collectHits) beamHits.push({ srcIdx, shipIdx: h.idx, depth, dist: d2, power: p,
+                                       hx, hy, ux, uy });
       pushHot(hx, hy, cr, cg, cb, p * 6.0);
       continue;
     }
@@ -3429,6 +3433,21 @@ function updateView() {
   viewOffY = viewAvailH * 0.5 - cam.y * viewScale;
 }
 
+/* The arena is exactly 16:9, so fitting it to a 16:9 viewport puts the
+   mirrored border right on the frame edge -- and any other aspect leaves dead
+   space beside it. A match therefore opens framed to COVER the viewport with a
+   little over, so the wall line sits just outside the picture and the floor
+   runs to all four edges. The camera clamp keeps it inside the arena, so the
+   border stays out of frame until the player zooms out to look for it. */
+const MATCH_OVERSCAN = 1.10;
+function frameArenaForMatch() {
+  cam.zoom = 1; updateView();                    // settle fitScale for this viewport
+  const cover = Math.max(W / VIEW_W, viewAvailH / VIEW_H) / Math.max(1e-6, fitScale);
+  cam.zoom = clamp(cover * MATCH_OVERSCAN, ZOOM_MIN, ZOOM_MAX);
+  cam.x = VIEW_W * 0.5; cam.y = VIEW_H * 0.5;
+  updateView();
+}
+
 /** Zoom about a point given in CSS pixels relative to the canvas. */
 function zoomAt(cssX, cssY, factor) {
   const sx = cssX * DPR, sy = cssY * DPR;
@@ -4915,6 +4934,47 @@ let vfxSeed = 1;
 let fireShake = 0, hitShake = 0;
 function vrnd() { vfxSeed = (vfxSeed * 1664525 + 1013904223) >>> 0; return vfxSeed / 4294967296; }
 function vrng(a, b) { return a + (b - a) * vrnd(); }
+/* Sparks where a beam lands. The shield does not simply absorb the shot in
+   silence: the contact point throws a little spray back along the beam, the
+   same embers the break-up uses but smaller, shorter-lived and thrown at the
+   hottest end of the ramp so they read yellow. Spawned from the damage pass,
+   which runs on a fixed substep, so the rate does not vary with frame rate. */
+function spawnImpactSparks(hits) {
+  if (!hits.length || vfxLoad() > 900) return;
+  /* Sixteen rays land per substep per shooter; one spray per target is what
+     reads as a hit, sixteen reads as a firework. Collapse them to a
+     power-weighted point per target first. */
+  const per = new Map();
+  for (const h of hits) {
+    if (!(h.power > 0) || h.hx === undefined) continue;
+    let a = per.get(h.shipIdx);
+    if (!a) per.set(h.shipIdx, a = { x: 0, y: 0, ux: 0, uy: 0, w: 0 });
+    a.x += h.hx * h.power; a.y += h.hy * h.power;
+    a.ux += h.ux * h.power; a.uy += h.uy * h.power; a.w += h.power;
+  }
+  for (const a of per.values()) {
+    if (!(a.w > 0)) continue;
+    const x = a.x / a.w, y = a.y / a.w;
+    const il = Math.hypot(a.ux, a.uy) || 1;
+    const ix = a.ux / il, iy = a.uy / il;            // direction of travel
+    // heavier fire sprays more, but never every substep: it should twinkle
+    const n = vrnd() < 0.45 ? 0 : 1 + (vrnd() < Math.min(0.6, a.w * 9) ? 1 : 0);
+    for (let i = 0; i < n; i++) {
+      /* Back along the beam, in a wide cone -- glancing spray off a curved
+         shield, not a fountain out of the far side. */
+      const b = Math.atan2(-iy, -ix) + (vrnd() - 0.5) * 2.3;
+      const sp = vrng(0.05, 0.20);
+      vfx.sparks.push({
+        x: x + ix * 0.004, y: y + iy * 0.004,
+        vx: Math.cos(b) * sp, vy: Math.sin(b) * sp,
+        r: vrng(0.0016, 0.0034), t: 0, life: vrng(0.09, 0.26),
+        temp: vrng(0.86, 1.0),                        // the yellow-white end
+        drag: vrng(1.4, 3.0), seed: vrnd(), flick: vrng(30, 72), a: 0,
+      });
+    }
+  }
+}
+
 /** Live particle count, so four wrecks on screen at once cost about what one
     does: every group is scaled by the remaining budget when it spawns. */
 function vfxLoad() { return vfx.fire.length + vfx.puffs.length + vfx.sparks.length + vfx.glows.length; }
@@ -5419,6 +5479,7 @@ function stepResolve(dt) {
     applySubstep(G.state, G.ctx, k);
     trace(true);                                  // deterministic damage pass
     applyHits(G.state, beamHits, msPer);
+    spawnImpactSparks(beamHits);
     applyCollisions(G.state, G.ctx);
   }
   // a ship that just died throws its explosion here, once
@@ -6237,7 +6298,7 @@ function attractStop() {
   vfx.glows.length = vfx.wrecks.length = 0;
   shakeAmp = fireShake = hitShake = 0;
   cam.zoom = 1; cam.x = VIEW_W * 0.5; cam.y = VIEW_H * 0.5;
-  updateView();
+  updateView();                 // newGame re-frames it for the match that follows
   ATT.watch = -1; ATT.boom = null; ATT.boomAge = 1e9; ATT.subjId = '';
   dirty = true;
 }

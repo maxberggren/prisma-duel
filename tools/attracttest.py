@@ -40,7 +40,12 @@ addEventListener('load', () => setTimeout(() => {
     R.attractOff    = ATT.on === false;
     R.lobbyGone     = document.getElementById('lobby').style.display === 'none';
     R.chromeBack    = !document.getElementById('ui').classList.contains('lobbyup');
-    R.camReset      = Math.abs(cam.zoom - 1) < 1e-6;
+    /* A match opens framed to COVER the viewport with a little over, so the
+       mirrored border sits outside the picture -- not at the plain fit. */
+    R.camFramed     = cam.zoom > 1.0 &&
+                      (cam.x - W/(2*viewScale)) > 0 && (cam.x + W/(2*viewScale)) < VIEW_W &&
+                      (cam.y - viewAvailH/(2*viewScale)) > 0 &&
+                      (cam.y + viewAvailH/(2*viewScale)) < VIEW_H;
     R.camWasMoved   = Math.abs(camBefore - 1) > 0.2;
     R.accumReleased = accHold === 0;
     R.vfxCleared    = vfxLoad() === 0;
@@ -88,7 +93,7 @@ LABELS = [
     ('attractOff',    'starting a match stops the demo'),
     ('lobbyGone',     'the lobby closes'),
     ('chromeBack',    'the in-match HUD comes back'),
-    ('camReset',      'the camera is handed back at default zoom'),
+    ('camFramed',     'the match opens framed with the arena border off screen'),
     ('accumReleased', 'the accumulator is left free after handover'),
     ('vfxCleared',    "the demo's smoke and fire do not bleed into the match"),
     ('freshMatch',    'the match starts at turn 0 with everyone alive'),
