@@ -1216,19 +1216,19 @@ const ATT = {
      seconds, i.e. a still image. "Almost still" has to still be moving, so a
      turn now takes about forty seconds: nine times slower than play, and
      visibly alive. */
-  scale: 0.095,        // simulated seconds per real second
+  scale: 0.055,        // simulated seconds per real second (a turn in ~73 s)
   evLift: 1.26,        // grade up to pay back what the veil takes
   /* Zoom and framing radius are two ends of one constraint: at this fit
      scale a subject of radius r needs zoom <= ~1.24/r to clear the frame
      vertically. Setting them independently is how the camera ended up at 2.45
      holding a 1.30 radius and putting every ship outside the picture. */
-  zoomMin: 2.4, zoomMax: 3.6,   // close enough to read hulls, muzzle flare and debris
+  zoomMin: 1.55, zoomMax: 2.6,  // close enough to read a hull, wide enough to hold a duel
   minR: 0.30,          // never push closer than this, however tight the action
-  maxR: 0.52,          // and never pull back further than this: crop the long shot
+  maxR: 0.80,          // and never pull back further than this: crop the long shot
   fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
-  boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.46,   // hold on a kill this long
+  boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.72,   // hold on a kill this long
   watch: -1,           // ship staging says is about to die
   crowdR: 1.35,        // how close counts as "in the same fight"
   tooClose: 0.85,      // hulls nearer than this read as a collision, not a duel
@@ -1239,8 +1239,8 @@ const ATT = {
   wantAlive: 4,        // fighters that must still be up when the viewer arrives
   castTries: 4,        // arenas auditioned for the opening
   castGood: 22.0,      // score at which we stop looking
-  crowdMaxR: 0.52,     // and how far back the camera may go to hold them
-  watchR: 0.44,        // how tight to sit on the ship that is about to go
+  crowdMaxR: 0.80,     // and how far back the camera may go to hold them
+  watchR: 0.74,        // how tight to sit on the ship that is about to go
   leadIn: 3.2,         // seconds of firefight before the kill lands
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
