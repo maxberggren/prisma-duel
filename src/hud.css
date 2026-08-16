@@ -10,11 +10,18 @@
     --dur:.16s;
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0;background:#05060a;overflow:hidden}
+  /* dvh, not %: iOS Safari's toolbars change the visible height as you scroll
+     and a percentage height keeps measuring the larger one, which pushed a
+     bottom-anchored panel below the fold. */
+  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden}
   body{font:13px/1.45 var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;touch-action:none}
   canvas{display:block;width:100%;height:100%}
 
-  .ui{position:fixed;inset:0;pointer-events:none;z-index:5}
+  /* height:100dvh, not just inset:0. A fixed element on iOS is laid out
+     against the LAYOUT viewport, which stays tall while Safari's toolbars are
+     on screen -- so a bottom-anchored panel hangs below the visible area and
+     gets clipped. dvh follows what is actually visible. */
+  .ui{position:fixed;inset:0;height:100dvh;pointer-events:none;z-index:5}
   .ui.hidden{opacity:0;transition:opacity .3s}
   .ui > *{pointer-events:auto}
 
@@ -47,8 +54,11 @@
        letter-spacing:.1em;color:var(--faint);margin-top:6px}
 
   /* -------------------------------------------------------------- orders */
+  /* Bottom right, and wide enough that ARM and COMMIT keep their labels on
+     one line beside each other -- at 266px they had about 125px a side, which
+     is less than "CHARGING 100%" needs, so they stacked. */
   .orders{
-    position:absolute;right:var(--pad);top:var(--pad);width:266px;
+    position:absolute;right:var(--pad);bottom:var(--pad);width:344px;
     background:var(--glass);border:1px solid var(--line);border-radius:13px;
     backdrop-filter:blur(18px) saturate(130%);-webkit-backdrop-filter:blur(18px) saturate(130%);
     box-shadow:0 22px 56px -22px rgba(0,0,0,.92);overflow:hidden;
@@ -87,8 +97,11 @@
   .meter{height:4px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden;margin-bottom:11px}
   .meter > i{display:block;height:100%;width:50%;border-radius:2px;background:var(--accent);
              transition:width .12s linear,background .12s linear}
-  .two{display:flex;gap:8px}
-  .two .btn{flex:1;min-width:0}
+  /* Side by side while there is room for both labels, stacked when there is
+     not -- a 266px panel in landscape left about 125px a side, which is less
+     than "CHARGING 100%" needs. */
+  .two{display:flex;gap:8px;flex-wrap:wrap}
+  .two .btn{flex:1 1 128px;min-width:0}
   .two .btn.fire{margin-top:0}
   .two .btn.commit{margin-top:0}
 
@@ -141,8 +154,11 @@
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
 
   /* --------------------------------------------------------------- notes */
+  /* Bottom left, not centred: the orders card moved to the bottom right and a
+     centred pill ran underneath it. */
   .hint{
-    position:absolute;left:50%;bottom:var(--pad);transform:translateX(-50%);
+    position:absolute;left:var(--pad);bottom:var(--pad);
+    max-width:calc(100vw - 400px - 2*var(--pad));
     font:11.5px/1.4 var(--sans);color:#8e99ad;background:rgba(8,10,15,.62);
     border:1px solid var(--line);border-radius:100px;padding:8px 16px;
     backdrop-filter:blur(10px);white-space:nowrap;max-width:calc(100vw - 40px);
@@ -247,6 +263,20 @@
   @media (hover:none){ .giz.idle{opacity:1} .giz.idle .hnd{pointer-events:auto} }
   @media (max-width:760px){
     :root{--pad:10px}
+    /* Keep clear of the notch and the home indicator. viewport-fit=cover was
+       already set, so the page draws under both; without these the top of the
+       roster sat under the status bar and COMMIT under the home indicator. */
+    .roster{top:calc(var(--pad) + env(safe-area-inset-top));
+            left:calc(var(--pad) + env(safe-area-inset-left));
+            right:calc(var(--pad) + env(safe-area-inset-right))}
+    .orders{bottom:calc(var(--pad) + env(safe-area-inset-bottom));
+            left:calc(var(--pad) + env(safe-area-inset-left));
+            right:calc(var(--pad) + env(safe-area-inset-right));
+            /* and never taller than what is left of the screen */
+            max-height:calc(100dvh - 2*var(--pad) - env(safe-area-inset-top)
+                            - env(safe-area-inset-bottom));
+            display:flex;flex-direction:column}
+    .obody{overflow-y:auto;overscroll-behavior:contain}
     .roster{width:auto;left:var(--pad);right:var(--pad);flex-direction:row;gap:6px}
     .card{flex:1;min-width:0;padding:7px 8px 8px}
     .card .lbl{display:none}
@@ -265,13 +295,16 @@
        getting fatter. */
     /* The start screen sits at the bottom on a phone, where a thumb is, and
        leaves the top two thirds of the glass to the match running behind it. */
-    .veil{place-items:end center;padding:0 0 var(--pad);--vx:50%;
+    .veil{place-items:end center;--vx:50%;
+          padding:0 0 calc(var(--pad) + env(safe-area-inset-bottom));
           background:
             radial-gradient(120% 52% at 50% 108%,
               rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
               rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
             linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
-    .modal{width:calc(100vw - 20px);padding:18px}
+    .modal{width:calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right));
+           padding:18px;max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));
+           overflow-y:auto;overscroll-behavior:contain}
     .modal h1{font-size:19px}
     .modal .sub{margin-bottom:14px}
     .modal .fld{margin:9px 0}

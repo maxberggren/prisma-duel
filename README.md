@@ -82,10 +82,14 @@ over a ~4 second animation:
 
 | Order | Effect |
 |---|---|
-| **Course** | Drag the handle. The shaded wedge is what your ship can physically reach this turn. |
-| **Throttle** | How fast you go. Speed costs you agility — a fast run cannot bring guns to bear. |
-| **Power split** | Thrust versus laser recharge. They are directly opposed: fly hard and you reload slowly. |
+| **Course** | Drag the handle, or steer with the arrow keys. How far you drag is how fast you go. |
 | **Fire** | Only when charged. Firing consumes the whole charge and suppresses shield regeneration. |
+
+There is one control, and it is out on the arena. Speed is bought from the same
+power the capacitor wants, so a long drag is a fast run with no reload, and a
+short one is a tight turn that fills the laser. The course line is coloured by
+what it costs and the panel shows the split; nothing in the panel is settable.
+The course carries over between rounds, so holding a curve is the default.
 
 Damage is **per millisecond of dwell**. A graze costs a few points; holding a
 target in the beam for a whole turn is fatal. Because the beam is welded to your
@@ -141,6 +145,7 @@ node src/core.test.js          # 36 assertions: rules, determinism, invariants
 node build.js --check          # index.html is in sync with src/
 python3 tools/boottest.py      # the shipped page actually boots and starts a match
 python3 tools/attracttest.py   # the start screen's demo hands the arena back cleanly
+node tools/mobilecheck.js      # layout at real phone/tablet/desktop viewports
 cd server && node test-signalling.js   # 52 assertions over every server path
 cd server && node test-headless.js     # 45 assertions, 4 real browsers,
                                        # a real 6-link WebRTC mesh

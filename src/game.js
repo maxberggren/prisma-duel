@@ -410,7 +410,10 @@ function spawnDestruction(sh) {
       x: cx + Math.cos(a) * R * vrng(0.1, 0.8), y: cy + Math.sin(a) * R * vrng(0.1, 0.8),
       vx: Math.cos(a) * sp + mvx * 0.35, vy: Math.sin(a) * sp + mvy * 0.35,
       r: R * vrng(1.1, 1.9), r1: R * vrng(4.0, 7.0),
-      t: -vrng(0.06, 0.7), life: vrng(5.0, 11.0), warm: 1, peak: vrng(0.70, 1.0),
+      /* About three turns. A turn is four seconds, so the old 5-11s plume was
+         gone within one or two -- long enough to look like an explosion, never
+         long enough to be terrain you could put between you and a laser. */
+      t: -vrng(0.06, 0.7), life: vrng(9.5, 15.0), warm: 1, peak: vrng(0.70, 1.0),
       wx: wx, wy: wy,
     });
   }
@@ -449,7 +452,7 @@ function stepVfx(dt) {
         // it does not disappear, it becomes the smoke it turned into
         pushSmoke({ x: p.x, y: p.y, vx: p.vx * 0.55, vy: p.vy * 0.55,
                     r: p.r * 1.05, r1: Math.min(p.r * vrng(1.30, 2.00), RULES.HULL_R * 9.0),
-                    life: vrng(4.5, 9.5), warm: 0.30, peak: vrng(0.85, 1.0),
+                    life: vrng(9.0, 14.0), warm: 0.30, peak: vrng(0.85, 1.0),
                     wx: p.wx, wy: p.wy });
       }
       vfx.fire.splice(i, 1); continue;
@@ -617,6 +620,9 @@ function commitOrders() {
   const sh = selfShip();
   if (!sh || !sh.alive) return;
   committed = true;
+  // how much of a turn this was, and how fast: next round starts from here
+  G.aimTurn = angDelta(sh.heading, G.aim.heading);
+  G.aimSpeed = G.aim.speed;
   const move = { heading: G.aim.heading, speed: G.aim.speed, thrust: G.aim.thrust,
                  fire: G.aim.fire, h: stateHash(G.state), sig: RULES_SIG };
   G.moves[sh.id] = move;
@@ -833,7 +839,18 @@ function beginPlan() {
   G.moves = {};
   committed = false;
   const sh = selfShip();
-  if (sh) { G.aim.heading = sh.heading; G.aim.speed = sh.speed; G.aim.fire = false; }
+  /* Carry the course across the turn boundary. Resetting the aim to the ship's
+     own heading meant every round opened pointing dead ahead, so a turn you
+     were part way through had to be dialled in again from scratch. Keeping the
+     angle you asked for last time -- relative to where the nose now is --
+     means holding a curve is the default and straightening is the decision. */
+  if (sh) {
+    G.aim.heading = sh.heading + (G.aimTurn || 0);
+    G.aim.speed = clamp(G.aimSpeed !== undefined ? G.aimSpeed : sh.speed,
+                        RULES.SPEED_MIN, RULES.SPEED_MAX);
+    G.aim.thrust = thrustFor(G.aim.speed);
+    G.aim.fire = false;
+  }
   G.planEnds = performance.now() + RULES.PLAN_SECONDS * 1000;
   gizSig = '';
   syncOrderUI(); renderRoster();

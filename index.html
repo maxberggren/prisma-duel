@@ -18,11 +18,18 @@
     --dur:.16s;
   }
   *{box-sizing:border-box}
-  html,body{height:100%;margin:0;background:#05060a;overflow:hidden}
+  /* dvh, not %: iOS Safari's toolbars change the visible height as you scroll
+     and a percentage height keeps measuring the larger one, which pushed a
+     bottom-anchored panel below the fold. */
+  html,body{height:100%;height:100dvh;margin:0;background:#05060a;overflow:hidden}
   body{font:13px/1.45 var(--sans);color:var(--ink);-webkit-font-smoothing:antialiased;touch-action:none}
   canvas{display:block;width:100%;height:100%}
 
-  .ui{position:fixed;inset:0;pointer-events:none;z-index:5}
+  /* height:100dvh, not just inset:0. A fixed element on iOS is laid out
+     against the LAYOUT viewport, which stays tall while Safari's toolbars are
+     on screen -- so a bottom-anchored panel hangs below the visible area and
+     gets clipped. dvh follows what is actually visible. */
+  .ui{position:fixed;inset:0;height:100dvh;pointer-events:none;z-index:5}
   .ui.hidden{opacity:0;transition:opacity .3s}
   .ui > *{pointer-events:auto}
 
@@ -55,8 +62,11 @@
        letter-spacing:.1em;color:var(--faint);margin-top:6px}
 
   /* -------------------------------------------------------------- orders */
+  /* Bottom right, and wide enough that ARM and COMMIT keep their labels on
+     one line beside each other -- at 266px they had about 125px a side, which
+     is less than "CHARGING 100%" needs, so they stacked. */
   .orders{
-    position:absolute;right:var(--pad);top:var(--pad);width:266px;
+    position:absolute;right:var(--pad);bottom:var(--pad);width:344px;
     background:var(--glass);border:1px solid var(--line);border-radius:13px;
     backdrop-filter:blur(18px) saturate(130%);-webkit-backdrop-filter:blur(18px) saturate(130%);
     box-shadow:0 22px 56px -22px rgba(0,0,0,.92);overflow:hidden;
@@ -95,8 +105,11 @@
   .meter{height:4px;border-radius:2px;background:rgba(255,255,255,.09);overflow:hidden;margin-bottom:11px}
   .meter > i{display:block;height:100%;width:50%;border-radius:2px;background:var(--accent);
              transition:width .12s linear,background .12s linear}
-  .two{display:flex;gap:8px}
-  .two .btn{flex:1;min-width:0}
+  /* Side by side while there is room for both labels, stacked when there is
+     not -- a 266px panel in landscape left about 125px a side, which is less
+     than "CHARGING 100%" needs. */
+  .two{display:flex;gap:8px;flex-wrap:wrap}
+  .two .btn{flex:1 1 128px;min-width:0}
   .two .btn.fire{margin-top:0}
   .two .btn.commit{margin-top:0}
 
@@ -149,8 +162,11 @@
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
 
   /* --------------------------------------------------------------- notes */
+  /* Bottom left, not centred: the orders card moved to the bottom right and a
+     centred pill ran underneath it. */
   .hint{
-    position:absolute;left:50%;bottom:var(--pad);transform:translateX(-50%);
+    position:absolute;left:var(--pad);bottom:var(--pad);
+    max-width:calc(100vw - 400px - 2*var(--pad));
     font:11.5px/1.4 var(--sans);color:#8e99ad;background:rgba(8,10,15,.62);
     border:1px solid var(--line);border-radius:100px;padding:8px 16px;
     backdrop-filter:blur(10px);white-space:nowrap;max-width:calc(100vw - 40px);
@@ -255,6 +271,20 @@
   @media (hover:none){ .giz.idle{opacity:1} .giz.idle .hnd{pointer-events:auto} }
   @media (max-width:760px){
     :root{--pad:10px}
+    /* Keep clear of the notch and the home indicator. viewport-fit=cover was
+       already set, so the page draws under both; without these the top of the
+       roster sat under the status bar and COMMIT under the home indicator. */
+    .roster{top:calc(var(--pad) + env(safe-area-inset-top));
+            left:calc(var(--pad) + env(safe-area-inset-left));
+            right:calc(var(--pad) + env(safe-area-inset-right))}
+    .orders{bottom:calc(var(--pad) + env(safe-area-inset-bottom));
+            left:calc(var(--pad) + env(safe-area-inset-left));
+            right:calc(var(--pad) + env(safe-area-inset-right));
+            /* and never taller than what is left of the screen */
+            max-height:calc(100dvh - 2*var(--pad) - env(safe-area-inset-top)
+                            - env(safe-area-inset-bottom));
+            display:flex;flex-direction:column}
+    .obody{overflow-y:auto;overscroll-behavior:contain}
     .roster{width:auto;left:var(--pad);right:var(--pad);flex-direction:row;gap:6px}
     .card{flex:1;min-width:0;padding:7px 8px 8px}
     .card .lbl{display:none}
@@ -273,13 +303,16 @@
        getting fatter. */
     /* The start screen sits at the bottom on a phone, where a thumb is, and
        leaves the top two thirds of the glass to the match running behind it. */
-    .veil{place-items:end center;padding:0 0 var(--pad);--vx:50%;
+    .veil{place-items:end center;--vx:50%;
+          padding:0 0 calc(var(--pad) + env(safe-area-inset-bottom));
           background:
             radial-gradient(120% 52% at 50% 108%,
               rgba(3,4,8,.94) 0%, rgba(3,4,8,.82) 42%,
               rgba(3,4,8,.34) 74%, rgba(3,4,8,0) 100%),
             linear-gradient(180deg, rgba(3,4,8,.34), rgba(3,4,8,0) 26%)}
-    .modal{width:calc(100vw - 20px);padding:18px}
+    .modal{width:calc(100vw - 20px - env(safe-area-inset-left) - env(safe-area-inset-right));
+           padding:18px;max-height:calc(100dvh - 24px - env(safe-area-inset-bottom));
+           overflow-y:auto;overscroll-behavior:contain}
     .modal h1{font-size:19px}
     .modal .sub{margin-bottom:14px}
     .modal .fld{margin:9px 0}
@@ -1104,7 +1137,8 @@ function newGame(players, seed, selfIdx) {
   G.winner = null;
   G.moves = {};
   const me = G.state.ships[selfIdx];
-  G.aim = { heading: me.heading, speed: me.speed, thrust: 0.5, fire: false };
+  G.aim = { heading: me.heading, speed: me.speed, thrust: thrustFor(me.speed), fire: false };
+  G.aimTurn = 0; G.aimSpeed = undefined;      // no curve carried in from a past match
   G.phase = 'plan';
   G.planEnds = performance.now() + RULES.PLAN_SECONDS * 1000;
   frameArenaForMatch();
@@ -5230,7 +5264,10 @@ function spawnDestruction(sh) {
       x: cx + Math.cos(a) * R * vrng(0.1, 0.8), y: cy + Math.sin(a) * R * vrng(0.1, 0.8),
       vx: Math.cos(a) * sp + mvx * 0.35, vy: Math.sin(a) * sp + mvy * 0.35,
       r: R * vrng(1.1, 1.9), r1: R * vrng(4.0, 7.0),
-      t: -vrng(0.06, 0.7), life: vrng(5.0, 11.0), warm: 1, peak: vrng(0.70, 1.0),
+      /* About three turns. A turn is four seconds, so the old 5-11s plume was
+         gone within one or two -- long enough to look like an explosion, never
+         long enough to be terrain you could put between you and a laser. */
+      t: -vrng(0.06, 0.7), life: vrng(9.5, 15.0), warm: 1, peak: vrng(0.70, 1.0),
       wx: wx, wy: wy,
     });
   }
@@ -5269,7 +5306,7 @@ function stepVfx(dt) {
         // it does not disappear, it becomes the smoke it turned into
         pushSmoke({ x: p.x, y: p.y, vx: p.vx * 0.55, vy: p.vy * 0.55,
                     r: p.r * 1.05, r1: Math.min(p.r * vrng(1.30, 2.00), RULES.HULL_R * 9.0),
-                    life: vrng(4.5, 9.5), warm: 0.30, peak: vrng(0.85, 1.0),
+                    life: vrng(9.0, 14.0), warm: 0.30, peak: vrng(0.85, 1.0),
                     wx: p.wx, wy: p.wy });
       }
       vfx.fire.splice(i, 1); continue;
@@ -5437,6 +5474,9 @@ function commitOrders() {
   const sh = selfShip();
   if (!sh || !sh.alive) return;
   committed = true;
+  // how much of a turn this was, and how fast: next round starts from here
+  G.aimTurn = angDelta(sh.heading, G.aim.heading);
+  G.aimSpeed = G.aim.speed;
   const move = { heading: G.aim.heading, speed: G.aim.speed, thrust: G.aim.thrust,
                  fire: G.aim.fire, h: stateHash(G.state), sig: RULES_SIG };
   G.moves[sh.id] = move;
@@ -5653,7 +5693,18 @@ function beginPlan() {
   G.moves = {};
   committed = false;
   const sh = selfShip();
-  if (sh) { G.aim.heading = sh.heading; G.aim.speed = sh.speed; G.aim.fire = false; }
+  /* Carry the course across the turn boundary. Resetting the aim to the ship's
+     own heading meant every round opened pointing dead ahead, so a turn you
+     were part way through had to be dialled in again from scratch. Keeping the
+     angle you asked for last time -- relative to where the nose now is --
+     means holding a curve is the default and straightening is the decision. */
+  if (sh) {
+    G.aim.heading = sh.heading + (G.aimTurn || 0);
+    G.aim.speed = clamp(G.aimSpeed !== undefined ? G.aimSpeed : sh.speed,
+                        RULES.SPEED_MIN, RULES.SPEED_MAX);
+    G.aim.thrust = thrustFor(G.aim.speed);
+    G.aim.fire = false;
+  }
   G.planEnds = performance.now() + RULES.PLAN_SECONDS * 1000;
   gizSig = '';
   syncOrderUI(); renderRoster();
