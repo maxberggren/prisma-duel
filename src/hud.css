@@ -121,48 +121,32 @@
   .two .btn.fire{margin-top:0}
   .two .btn.commit{margin-top:0}
 
-  /* The buttons are cut from the same material as the prisms: dichroic film,
-     which is why the stops run indigo -> violet -> blue -> cyan -> teal rather
-     than being any one colour. Thin-film interference shifts hue with viewing
-     angle, so the gradient is oversized and slides on hover -- the same band
-     sweep you get tilting a real coated surface. Secondary buttons wear the
-     dark, near-extinguished version of the film so the hierarchy survives. */
   .btn{
     display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
-    /* The label must never wrap: "CHARGING 100%" was folding onto a second
-       line inside the button, which reads as the button being too small for
-       its own text even though nothing overflows. The keyboard chip is the
-       part that gives way. */
+    /* The label must never wrap: a long one folding onto a second line reads
+       as the button being too small for its own text even when nothing
+       overflows. The keyboard chip is the part that gives way. */
     white-space:nowrap;
-    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#d8e2f2;
-    background-image:linear-gradient(108deg,
-      #171a35 0%, #1d2050 15%, #2a2360 30%, #3a2a63 43%,
-      #24406b 57%, #1b5b6b 71%, #1d6a63 84%, #191c3c 100%);
-    background-size:210% 100%;background-position:6% 0;
+    font:600 12px/1 var(--sans);letter-spacing:.05em;color:#cfd8e8;
+    background:rgba(255,255,255,.055);
     border:1px solid var(--line);border-radius:9px;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.10), inset 0 -10px 20px -14px rgba(0,0,0,.85);
     padding:11px 12px;cursor:pointer;
-    transition:background-position .55s ease, border-color var(--dur), color var(--dur),
-               box-shadow var(--dur);
+    transition:background var(--dur),border-color var(--dur),color var(--dur);
   }
-  .btn:hover{background-position:62% 0;color:#fff;border-color:rgba(160,210,255,.34)}
+  .btn:hover{background:rgba(255,255,255,.10);color:#fff;border-color:rgba(255,255,255,.18)}
   .btn:active{transform:translateY(1px)}
   .btn:disabled{opacity:.4;cursor:not-allowed}
   .btn:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(127,216,255,.5)}
   .btn.fire{margin-top:4px}
   .btn.fire[aria-pressed="true"]{background:rgba(255,107,129,.18);border-color:rgba(255,107,129,.6);color:#ffd9df}
-  /* The one action a first-time visitor should take, in full film. */
+  /* The one action worth taking, marked by weight rather than by colour. */
   .btn.primary, .btn.commit{
-    color:#f4faff;text-shadow:0 1px 7px rgba(0,0,0,.6);
-    background-image:linear-gradient(108deg,
-      #2b2f86 0%, #3a35a8 13%, #5b38b4 26%, #8038a4 38%,
-      #3f63d2 53%, #2a9fc8 67%, #2fc3ac 80%, #3552bd 91%, #2b2f86 100%);
-    border-color:rgba(190,232,255,.46);
-    box-shadow:inset 0 1px 0 rgba(255,255,255,.34),
-               inset 0 -10px 22px -12px rgba(0,0,0,.75),
-               0 12px 30px -18px rgba(96,72,230,.95);
+    color:#e6f5ff;
+    background:rgba(127,216,255,.15);
+    border-color:rgba(127,216,255,.40);
   }
-  .btn.primary:hover, .btn.commit:hover{border-color:rgba(214,242,255,.7)}
+  .btn.primary:hover, .btn.commit:hover{
+    background:rgba(127,216,255,.24);border-color:rgba(127,216,255,.60);color:#fff}
   .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);
@@ -219,20 +203,21 @@
     border-radius:16px;padding:24px;
     /* Lifted off the scene, not dropped into a pit: the card sits over a live
        match, and a heavy shadow made it look pasted on rather than floating. */
-    box-shadow:0 20px 52px -34px rgba(0,0,0,.68), 0 0 34px -16px rgba(96,86,220,.26)
+    box-shadow:0 20px 52px -34px rgba(0,0,0,.70), 0 0 30px -18px rgba(150,175,215,.20)
   }
-  /* A dichroic rim, the same film the prisms and the buttons are cut from: a
-     gradient painted into a one-pixel ring by masking out the middle. A flat
-     10%-white hairline disappeared against a scene that is itself dark. */
+  /* A light rim, painted into a one-pixel ring by masking out the middle. It
+     is one colour with the light falling across it -- bright where the key is,
+     fading round the far side -- rather than a run through the spectrum. A
+     flat 10%-white hairline disappeared against a scene this dark. */
   .modal::after{
-    content:"";position:absolute;inset:0;border-radius:inherit;padding:1.4px;
+    content:"";position:absolute;inset:0;border-radius:inherit;padding:1.2px;
     pointer-events:none;
-    background:linear-gradient(135deg,
-      #6fe4ff 0%, #6f7bff 22%, #a45cff 40%, #d95ce0 54%, #3f8bff 72%, #2fc3ac 88%, #6fe4ff 100%);
+    background:linear-gradient(146deg,
+      rgba(255,255,255,.50) 0%, rgba(226,238,255,.26) 32%,
+      rgba(210,226,248,.12) 58%, rgba(196,216,244,.24) 100%);
     -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite:xor;      mask-composite:exclude;
-    opacity:.72;
   }
   .modal h1{margin:0 0 3px;font:600 21px/1 var(--sans);letter-spacing:.30em;text-transform:uppercase}
   .modal .status:empty{display:none}
