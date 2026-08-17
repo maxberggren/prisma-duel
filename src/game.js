@@ -309,6 +309,7 @@ function vrng(a, b) { return a + (b - a) * vrnd(); }
    same embers the break-up uses but smaller, shorter-lived and thrown at the
    hottest end of the ramp so they read yellow. Spawned from the damage pass,
    which runs on a fixed substep, so the rate does not vary with frame rate. */
+const IMPACT_SPARKS = 4;   // sparks per spray; was 1 and read as a fizz, not a hit
 function spawnImpactSparks(hits) {
   if (!hits.length || vfxLoad() > 900) return;
   /* Sixteen rays land per substep per shooter; one spray per target is what
@@ -327,8 +328,9 @@ function spawnImpactSparks(hits) {
     const x = a.x / a.w, y = a.y / a.w;
     const il = Math.hypot(a.ux, a.uy) || 1;
     const ix = a.ux / il, iy = a.uy / il;            // direction of travel
-    // heavier fire sprays more, but never every substep: it should twinkle
-    const n = vrnd() < 0.45 ? 0 : 1 + (vrnd() < Math.min(0.6, a.w * 9) ? 1 : 0);
+    // heavier fire sprays more, but never every substep: it should twinkle.
+    // IMPACT_SPARKS scales the whole spray without touching that rhythm.
+    const n = (vrnd() < 0.45 ? 0 : 1 + (vrnd() < Math.min(0.6, a.w * 9) ? 1 : 0)) * IMPACT_SPARKS;
     for (let i = 0; i < n; i++) {
       /* Back along the beam, in a wide cone -- glancing spray off a curved
          shield, not a fountain out of the far side. */
@@ -1221,7 +1223,7 @@ function wireNet() {
   if (typeof Net === 'undefined') return false;
 
   Net.on('move', ({ turn, peerId, move }) => {
-    if (!G.state || turn !== G.state.turn) return;
+    if (!NET.live || !G.state || turn !== G.state.turn) return;
     const sh = G.state.ships.find(s => s.id === peerId);
     if (!sh) return;
 
@@ -1240,18 +1242,18 @@ function wireNet() {
   });
 
   Net.on('resolve', ({ turn, moves }) => {
-    if (!G.state || turn !== G.state.turn || G.phase !== 'plan') return;
+    if (!NET.live || !G.state || turn !== G.state.turn || G.phase !== 'plan') return;
     G.moves = moves;
     startResolve(moves);
   });
 
   Net.on('chat', ({ text }) => {
     if (text.slice(0, RESYNC_REQ.length) === RESYNC_REQ) {
-      if (NET.isArbiter() && G.state) Net.sendChat(RESYNC_ST + JSON.stringify(serialiseState()));
+      if (NET.isArbiter() && NET.live && G.state) Net.sendChat(RESYNC_ST + JSON.stringify(serialiseState()));
       return;
     }
     if (text.slice(0, RESYNC_ST.length) === RESYNC_ST) {
-      if (NET.isArbiter() || !G.state) return;
+      if (NET.isArbiter() || !NET.live || !G.state) return;
       try { adoptState(JSON.parse(text.slice(RESYNC_ST.length))); }
       catch (e) { console.warn('resync failed', e); }
     }
@@ -1307,8 +1309,13 @@ const RULES_SIG = (() => {
   return h.toString(36).toUpperCase();
 })();
 let desynced = false;
+/* "Is a real match running?" -- G.state alone is the wrong question, because
+   the attract demo behind the lobby is a real match too, and it owns G.state
+   from the moment the page loads. Asking G.state here is what silently made
+   the START button dead and startMatchFrom() a no-op for everyone. */
+const inMatch = () => !!G.state && !ATT.on;
 function startMatchFrom(payload) {
-  if (G.state) return;                                   // already playing
+  if (inMatch()) return;                                 // already playing
   if (payload.sig && payload.sig !== RULES_SIG) {
     setStatus('Build mismatch — the host is running a different version of the ' +
               'game (' + payload.sig + ' vs yours ' + RULES_SIG + '). Reload the ' +
@@ -1331,8 +1338,8 @@ function refreshLobby() {
             lobbyRoster.map(p => p.name).join(', '));
   const btn = $('bStart');
   if (!btn) return;
-  const canStart = Net.isArbiter() && n >= 2 && !G.state;
-  btn.style.display = n >= 2 && !G.state ? '' : 'none';
+  const canStart = Net.isArbiter() && n >= 2 && !inMatch();
+  btn.style.display = n >= 2 && !inMatch() ? '' : 'none';
   btn.disabled = !canStart;
   btn.textContent = canStart ? `START MATCH — ${n} PILOTS`
                              : 'WAITING FOR HOST TO START';
@@ -1365,7 +1372,7 @@ $('bJoin').addEventListener('click', async () => {
 });
 
 $('bStart').addEventListener('click', () => {
-  if (!Net.isArbiter() || G.state) return;
+  if (!Net.isArbiter() || inMatch()) return;
   const players = lobbyRoster
     .slice()
     .sort((a, b) => a.peerId - b.peerId)          // one canonical order for all
@@ -1396,10 +1403,15 @@ const ATT = {
   on: false,
   /* Pace. It was 0.026 -- a turn in two and a half minutes -- and measurement
      said what that really is: 0.05% of pixels changing over three and a half
-     seconds, i.e. a still image. "Almost still" has to still be moving, so a
-     turn now takes about forty seconds: nine times slower than play, and
-     visibly alive. */
-  scale: 0.055,        // simulated seconds per real second (a turn in ~73 s)
+     seconds, i.e. a still image. It then ran at 0.055 (a turn in ~73 s) and
+     was asked to go half that again: the light still crawls, the crane still
+     moves, and nothing happens fast enough to compete with the dialog. */
+  scale: 0.0275,       // simulated seconds per real second (a turn in ~146 s)
+  /* The casting steps the audition in real seconds through attractFrame, so
+     the pace it runs at decides which frames get judged -- and which opening
+     wins. Pin it: the pick must not change because the playback got slower.
+     0.055 is the pace the kept opening was cast at. */
+  stagePace: 0.055,
   evLift: 1.26,        // grade up to pay back what the veil takes
   /* Zoom and framing radius are two ends of one constraint: at this fit
      scale a subject of radius r needs zoom <= ~1.24/r to clear the frame
@@ -1408,7 +1420,7 @@ const ATT = {
   zoomMin: 1.55, zoomMax: 2.6,  // close enough to read a hull, wide enough to hold a duel
   minR: 0.30,          // never push closer than this, however tight the action
   maxR: 0.80,          // and never pull back further than this: crop the long shot
-  fanReach: 2.3,       // how far from the impact the fan is still 'this shot'
+  fanReach: 1.6,       // how far from the impact the fan is still 'this shot'
   shotMax: 65,         // seconds before the camera goes looking for another angle
   shotT: 0, stale: false, lastShooter: -1,
   boom: null, boomAge: 1e9, boomHold: 15, boomR: 0.72,   // hold on a kill this long
@@ -1424,7 +1436,7 @@ const ATT = {
   castGood: 22.0,      // score at which we stop looking
   crowdMaxR: 0.80,     // and how far back the camera may go to hold them
   watchR: 0.74,        // how tight to sit on the ship that is about to go
-  leadIn: 2.4,         // seconds of firefight before the kill lands
+  leadIn: 3.2,         // sim seconds of firefight before the kill lands
   heatScale: 0.65,     // fireballs play at about two-thirds of real time
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
@@ -1432,16 +1444,27 @@ const ATT = {
   breathe: 0.075, breatheRate: 0.17,   // ~37 s zoom cycle, perceptible but calm
   drift: 0.085, driftRate: 0.11,       // slow lateral crane drift, sim-independent
   margin: 1.45,        // headroom around the subject
-  ease: 0.55,          // how lazily the crane drifts inside one shot
-  pushEase: 4.2,       // ...and how briskly it moves between shots
-  pushFor: 0.9,        // seconds of that brisk move
+  ease: 0.32,          // how lazily the crane drifts inside one shot (exp. rate)
+  /* Between shots the crane makes one deliberate move: a timed ease-in-out
+     from where it was to where the new subject is, zero velocity at both
+     ends. It used to be an exponential push landing inside a second, which is
+     fastest at the very first frame -- exactly what read as a jump cut on a
+     screen where nothing else moves quickly. */
+  pushFor: 6.0,        // seconds the move between shots takes
+  pushFrom: null,      // {zoom,x,y} the move started from
   cutT: 9e9,
   subjId: '',
-  fps: 24,             // the demo's own frame rate (see attractFrame)
+  fps: 0,              // demo frame-rate cap; 0 = every display frame (see attractFrame)
   acc: 0,
-  wGlass: 90, wGlassFirst: 40, wHit: 10,    // a demo pilot values glass over damage
-  wSpread: 190,        // ...and values a wide fan most of all
-  wThrow: 26, throwIdeal: 2.6,   // ...with a long free run for it to open into
+  /* The pilots' taste decides what the casting has to choose from, and this
+     set -- glass first, spread second, no throw term -- is the one that
+     produced the opening worth keeping: two fighters trading beams through the
+     crystals from the first frame. Re-weighting for wider fans (90/190 plus a
+     throw term) measured better on paper and opened on a lone hull burning in
+     the dark instead. The picture won. */
+  wGlass: 190, wGlassFirst: 40, wHit: 10,   // a demo pilot values glass over damage
+  wSpread: 55,         // ...and values a wide fan
+  wThrow: 0, throwIdeal: 2.6,    // free run past the glass; 0 = not scored
   pan: 0.22,           // a little slack past the walls, not enough to read as letterboxing
   camT: 0, overT: 0, seed: 20260816,
 };
@@ -1483,10 +1506,12 @@ function attractShotScore(sh, heading, x, y) {
        slightly different angles and need a long free run before that becomes a
        spread rather than a fringe. Measured on the shipped screen, the one
        real fan in the opening was eight pixels wide -- it had nowhere to go. */
-    let t = first.t + 0.02;
-    while (t < 4 && prismAt(x + dx * t, y + dy * t) >= 0) t += 0.03;   // out the far side
-    const beyond = sceneHit(x + dx * (t + 0.01), y + dy * (t + 0.01), dx, dy, sh.idx);
-    score += Math.min(beyond ? beyond.t : 3, ATT.throwIdeal) * ATT.wThrow;
+    if (ATT.wThrow > 0) {
+      let t = first.t + 0.02;
+      while (t < 4 && prismAt(x + dx * t, y + dy * t) >= 0) t += 0.03;   // out the far side
+      const beyond = sceneHit(x + dx * (t + 0.01), y + dy * (t + 0.01), dx, dy, sh.idx);
+      score += Math.min(beyond ? beyond.t : 3, ATT.throwIdeal) * ATT.wThrow;
+    }
   }
   return score;
 }
@@ -1693,6 +1718,8 @@ function attractCandidate(lead) {
 function attractStage() {
   if (ATT.staging) return;                        // never re-enter
   ATT.staging = true;
+  const playPace = ATT.scale;
+  ATT.scale = ATT.stagePace;
   const lead = Math.round(ATT.leadIn / ATT.stageStep);
   const FR = ATT.stageStep;
 
@@ -1719,6 +1746,7 @@ function attractStage() {
     vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
     vfx.glows.length = vfx.wrecks.length = 0;
   }
+  ATT.scale = playPace;
   ATT.staging = false;
 
   /* Put the dialog on the side the battle is not. Decided here, once, while
@@ -1925,7 +1953,10 @@ function attractCamera(dt) {
      nine sampled frames came back identical because of it. After a while the
      camera is made to look for someone else. */
   const cut = subj.id !== ATT.subjId;
-  if (cut) { ATT.subjId = subj.id; ATT.shotT = 0; ATT.cutT = 0; ATT.stale = false; }
+  if (cut) {
+    ATT.subjId = subj.id; ATT.shotT = 0; ATT.cutT = 0; ATT.stale = false;
+    ATT.pushFrom = { zoom: cam.zoom, x: cam.x, y: cam.y };
+  }
   else { ATT.shotT += Math.min(dt, 1); if (ATT.shotT > ATT.shotMax) ATT.stale = true; }
   ATT.cutT += Math.min(dt, 1);
 
@@ -1951,20 +1982,34 @@ function attractCamera(dt) {
   const zLo = Math.max(ATT.zoomMin, cover * 1.02);
   const zTarget = clamp(fit, zLo, Math.max(ATT.zoomMax, zLo)) * breathe;
 
-  /* An instant cut reads as a glitch on a screen this still, and a slow ease
-     leaves the camera trailing the action forever. So: a fast push that lands
-     inside a second, then the lazy drift. */
-  const rate = ATT.cutT < ATT.pushFor ? ATT.pushEase : ATT.ease;
-  const e = 1 - Math.pow(0.5, Math.min(dt, 1) * rate);
-  cam.zoom += (zTarget - cam.zoom) * e;
-  updateView();                       // refresh viewScale before using it below
-
-  /* Put the subject in the middle of the free strip, with a slow lateral drift
-     so the frame is never nailed down. */
+  /* Where the crane wants to be: the subject in the middle of the free strip,
+     with a slow lateral drift so the frame is never nailed down. */
   const driftX = Math.cos(ATT.camT * ATT.driftRate) * ATT.drift;
   const driftY = Math.sin(ATT.camT * ATT.driftRate * 0.73) * ATT.drift * 0.6;
-  cam.x += (subj.x - (strip.mid / W - 0.5) * W / viewScale + driftX - cam.x) * e;
-  cam.y += (subj.y + driftY - cam.y) * e;
+  const xAt = (zoom) => subj.x - (strip.mid / W - 0.5) * W / (fitScale * zoom) + driftX;
+  const yTarget = subj.y + driftY;
+
+  /* Two regimes. Right after a cut: one timed move, eased in and out
+     (smootherstep -- zero velocity and acceleration at both ends), from the
+     pose the cut found the crane in to the live target, which keeps being
+     re-read so the move lands on the subject wherever it has drifted to. Then:
+     a lazy exponential follow for the rest of the shot. The tween ends exactly
+     on the target, so the hand-over is seamless. A huge dt is the opening
+     snap: land at once. */
+  const snap = dt > 100;
+  if (snap) ATT.cutT = ATT.pushFor;
+  if (ATT.pushFrom && ATT.cutT < ATT.pushFor) {
+    const u = clamp(ATT.cutT / ATT.pushFor, 0, 1);
+    const k = u * u * u * (u * (u * 6 - 15) + 10);
+    cam.zoom = ATT.pushFrom.zoom + (zTarget - ATT.pushFrom.zoom) * k;
+    cam.x = ATT.pushFrom.x + (xAt(cam.zoom) - ATT.pushFrom.x) * k;
+    cam.y = ATT.pushFrom.y + (yTarget - ATT.pushFrom.y) * k;
+  } else {
+    const e = 1 - Math.pow(0.5, Math.min(dt, 1) * ATT.ease);
+    cam.zoom += (zTarget - cam.zoom) * e;
+    cam.x += (xAt(cam.zoom) - cam.x) * e;
+    cam.y += (yTarget - cam.y) * e;
+  }
   updateView();
 
 }
@@ -1981,14 +2026,18 @@ function attractFrame(dt) {
      which is exactly what "it starts zoomed in and then moves" was. */
   if (ATT.snap && W && viewScale > 0) { attractCamera(1e3); ATT.snap = false; }
 
-  /* The demo draws at its own rate, not the display's. At a fortieth of pace
-     the difference between 24 and 60 frames a second is invisible -- what is
-     very visible is a menu screen that spins up the fan of the laptop it is
-     sitting on. Skipped frames cost nothing: the sim is stepped by the whole
-     elapsed time when the frame does come. */
-  ATT.acc += dt;
-  if (ATT.acc < 1 / ATT.fps) return;
-  dt = ATT.acc; ATT.acc = 0;
+  /* Optional frame-rate cap. It shipped at 24 to spare laptop fans, and that
+     was the "strange jumpiness": on a 60 Hz display a 24 fps gate lands
+     frames alternately 33 and 50 ms apart, and a slow, smooth crane move drawn
+     at an uneven cadence judders. Off by default: the demo draws on every
+     display frame like the match does. */
+  if (ATT.fps > 0) {
+    ATT.acc += dt;
+    if (ATT.acc < 1 / ATT.fps) return;
+    dt = ATT.acc; ATT.acc = 0;
+  }
+  /* An observer's camera, not a cockpit: nothing here may rattle the frame. */
+  shakeAmp = fireShake = hitShake = 0;
 
   const sdt = dt * ATT.scale;
   if (G.phase === 'plan') {

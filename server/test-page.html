@@ -3,6 +3,13 @@
 <head><meta charset="utf-8"><title>lazer net harness</title></head>
 <body>
 <pre id="out">net test harness</pre>
+<script>
+// ?nortc=1 -> pretend this browser has no WebRTC at all (relay-only client)
+if (/[?&]nortc=1/.test(location.search)) {
+  try { Object.defineProperty(window, 'RTCPeerConnection', { value: undefined, configurable: true }); } catch (e) {}
+  try { window.webkitRTCPeerConnection = undefined; } catch (e) {}
+}
+</script>
 <script src="/__net/net.js"></script>
 <script>
 // Headless test harness. Records every Net event so the driver can assert on

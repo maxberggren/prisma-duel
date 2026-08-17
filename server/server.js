@@ -1,13 +1,29 @@
 'use strict';
 /*
- * lazer -- matchmaking + WebRTC signalling server
+ * lazer -- matchmaking + WebRTC signalling server (+ relay fallback)
  * =================================================================
- * This server does EXACTLY two things:
+ * This server does three things:
  *   1. matchmaking  : puts up to 4 players into a room and hands out peer ids
  *   2. signalling   : relays SDP / ICE blobs between peers, verbatim
- * It never sees a move, a turn, or any game state. Once the WebRTC mesh is up
- * the clients talk directly to each other and this process is dead weight
- * (it is still kept around so late joiners / reconnects can be signalled).
+ *   3. relay        : forwards opaque gameplay blobs between peers of a room,
+ *                     verbatim, for pairs whose direct WebRTC link is not (yet)
+ *                     up -- symmetric NAT, corporate firewalls, UDP blocked.
+ *                     The WebSocket is the one path that is guaranteed to work
+ *                     wherever the page itself loaded from, so it is the
+ *                     fallback of last resort. The server never PARSES a move;
+ *                     it moves bytes from one socket to another.
+ * Once the WebRTC mesh is up the clients talk directly to each other and this
+ * process only sees pings and signalling for late joiners / reconnects.
+ *
+ * ICE / TURN
+ *   JOINED carries `ice`: the RTCPeerConnection iceServers list the client
+ *   should use. Configure with env:
+ *     ICE_SERVERS   JSON array of RTCIceServer objects (used verbatim), or
+ *     TURN_URLS     comma-separated turn:/turns: URLs, plus EITHER
+ *       TURN_SECRET   coturn `static-auth-secret` -> per-join HMAC credentials
+ *                     valid TURN_TTL seconds (default 86400), OR
+ *       TURN_USER / TURN_PASS   a fixed long-term credential.
+ *   Google's public STUN servers are always appended unless NO_STUN=1.
  *
  * It also serves the static client so `node server.js` + open the URL is
  * enough to play.
@@ -17,14 +33,16 @@
  * client -> server
  *   {t:'JOIN',   room?:'ABCD', name?:'max', resume?:{peerId,token}}
  *   {t:'SIGNAL', to:<peerId>, data:<opaque>}
+ *   {t:'RELAY',  to:<peerId>, data:<opaque>}       // gameplay bytes, verbatim
  *   {t:'PING',   ts:<number>}
  *   {t:'LEAVE'}
  *
  * server -> client
- *   {t:'JOINED',    room, selfId, token, roster:[{peerId,name}], resumed:bool}
+ *   {t:'JOINED',    room, selfId, token, roster:[{peerId,name}], resumed:bool, ice:[RTCIceServer]}
  *   {t:'PEER_JOIN', peerId, name, roster:[...]}
  *   {t:'PEER_LEAVE',peerId, roster:[...]}
  *   {t:'SIGNAL',    from:<peerId>, data:<opaque>}
+ *   {t:'RELAY',     from:<peerId>, data:<opaque>}
  *   {t:'PONG',      ts}
  *   {t:'ERROR',     code, message}
  *      codes: BAD_JSON BAD_MESSAGE TOO_BIG ROOM_FULL NOT_IN_ROOM
@@ -63,13 +81,53 @@ const SWEEP_MS = parseInt(process.env.SWEEP_MS || '2500', 10);
 const JOINS_PER_SOCKET = 5;             // a socket may (re)join at most this often
 const JOIN_WINDOW_MS = 60000;
 const JOINS_PER_IP = 30;                // per JOIN_WINDOW_MS
-const MSG_BUDGET = 400;                 // messages ...
+// Relayed gameplay traffic rides this socket too: 3 peers x (ping every 2 s +
+// a move per turn + resolves) is a couple of messages a second, so the budget
+// is generous but still far below what a flood looks like.
+const MSG_BUDGET = 1500;                // messages ...
 const MSG_WINDOW_MS = 10000;            // ... per window, per socket
 const ROOM_CODE_LEN = 4;
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; // no I, no O
 const MAX_ROOMS = 5000;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+
+// ------------------------------------------------------------- ICE / TURN ---
+const STUN_DEFAULT = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+];
+const TURN_URLS = (process.env.TURN_URLS || '').split(',').map(s => s.trim()).filter(Boolean);
+const TURN_SECRET = process.env.TURN_SECRET || '';
+const TURN_TTL = parseInt(process.env.TURN_TTL || '86400', 10);
+let ICE_STATIC = null;
+if (process.env.ICE_SERVERS) {
+  try {
+    const v = JSON.parse(process.env.ICE_SERVERS);
+    if (Array.isArray(v)) ICE_STATIC = v;
+    else log('ICE_SERVERS is not a JSON array; ignoring');
+  } catch (e) { log('ICE_SERVERS is not valid JSON; ignoring'); }
+}
+
+/** iceServers list for one joining client. peerId is folded into the TURN
+ *  username so credentials are per-seat and expire (coturn use-auth-secret). */
+function iceServersFor(peerId) {
+  const out = [];
+  if (ICE_STATIC) out.push(...ICE_STATIC);
+  if (TURN_URLS.length) {
+    if (TURN_SECRET) {
+      const username = Math.floor(Date.now() / 1000 + TURN_TTL) + ':lazer' + peerId;
+      const credential = crypto.createHmac('sha1', TURN_SECRET).update(username).digest('base64');
+      out.push({ urls: TURN_URLS, username, credential });
+    } else if (process.env.TURN_USER) {
+      out.push({ urls: TURN_URLS, username: process.env.TURN_USER, credential: process.env.TURN_PASS || '' });
+    } else {
+      out.push({ urls: TURN_URLS });
+    }
+  }
+  if (process.env.NO_STUN !== '1') out.push(...STUN_DEFAULT);
+  return out;
+}
 
 // ------------------------------------------------------------- static fs ---
 // Serve whatever directory actually holds the game. Default: walk up from this
@@ -127,7 +185,7 @@ const httpServer = http.createServer((req, res) => {
   const url = req.url || '/';
   if (url === '/healthz') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ ok: true, rooms: rooms.size, peers: totalPeers() }));
+    return res.end(JSON.stringify({ ok: true, rooms: rooms.size, peers: totalPeers(), turn: TURN_URLS.length > 0, relay: true }));
   }
   if (url === '/rooms.json') { // debug/observability only, no game state
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -258,6 +316,7 @@ wss.on('connection', (ws, req) => {
       switch (m.t) {
         case 'JOIN':   return onJoin(ws, c, m);
         case 'SIGNAL': return onSignal(ws, c, m);
+        case 'RELAY':  return onRelay(ws, c, m);
         case 'PING':   return void send(ws, { t: 'PONG', ts: typeof m.ts === 'number' ? m.ts : 0 });
         case 'LEAVE':  { if (c.room && c.peer) removePeer(c.room, c.peer, 'left'); c.room = null; c.peer = null; return; }
         default:       return fail(ws, 'BAD_MESSAGE', 'unknown type ' + m.t.slice(0, 24));
@@ -321,7 +380,7 @@ function onJoin(ws, c, m) {
       if (typeof m.name === 'string') p.name = sanitizeName(m.name, p.peerId);
       c.peer = p; c.room = r;
       log('resume', r.code, p.peerId, p.name);
-      return void send(ws, { t: 'JOINED', room: r.code, selfId: p.peerId, token: p.token, roster: roster(r), resumed: true });
+      return void send(ws, { t: 'JOINED', room: r.code, selfId: p.peerId, token: p.token, roster: roster(r), resumed: true, ice: iceServersFor(p.peerId) });
     }
     // resume failed -> fall through and join normally with a fresh id
   }
@@ -350,7 +409,7 @@ function onJoin(ws, c, m) {
   c.peer = peer; c.room = r;
   log('join', r.code, peerId, peer.name, '(' + r.peers.size + '/' + MAX_PLAYERS + ')');
 
-  send(ws, { t: 'JOINED', room: r.code, selfId: peerId, token: peer.token, roster: roster(r), resumed: false });
+  send(ws, { t: 'JOINED', room: r.code, selfId: peerId, token: peer.token, roster: roster(r), resumed: false, ice: iceServersFor(peerId) });
   broadcast(r, { t: 'PEER_JOIN', peerId, name: peer.name, roster: roster(r) }, peerId);
 }
 
@@ -363,6 +422,19 @@ function onSignal(ws, c, m) {
   if (!dst || !dst.ws) return fail(ws, 'NO_SUCH_PEER', 'peer ' + m.to + ' is not reachable');
   // verbatim relay, only `from` is added. The server does not read `data`.
   send(dst.ws, { t: 'SIGNAL', from: c.peer.peerId, data: m.data });
+}
+
+function onRelay(ws, c, m) {
+  if (!c.peer || !c.room) return fail(ws, 'NOT_IN_ROOM', 'JOIN first');
+  if (!Number.isInteger(m.to)) return fail(ws, 'BAD_MESSAGE', 'RELAY needs integer `to`');
+  if (m.to === c.peer.peerId) return fail(ws, 'BAD_MESSAGE', 'cannot relay to yourself');
+  if (m.data === undefined) return fail(ws, 'BAD_MESSAGE', 'RELAY needs `data`');
+  const dst = c.room.peers.get(m.to);
+  // A zombie (socket down, seat kept) simply drops the message: the sender's
+  // own lockstep buffering/arbiter timer copes, exactly as it would with a
+  // dropped DataChannel. No error reply -- it would only add chatter.
+  if (!dst || !dst.ws) return;
+  send(dst.ws, { t: 'RELAY', from: c.peer.peerId, data: m.data });
 }
 
 // ------------------------------------------------------------- heartbeat ---

@@ -66,7 +66,8 @@ class CDP {
 }
 
 // ------------------------------------------------------------ browser peer
-async function launchBrowser(i) {
+async function launchBrowser(i, opts) {
+  opts = opts || {};
   const port = 9410 + i;
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lazer-net-' + i + '-'));
   const bin = chromiumBin();
@@ -82,7 +83,8 @@ async function launchBrowser(i) {
     // .local candidates (there is no mDNS responder in this environment)
     '--disable-features=WebRtcHideLocalIpsWithMdns',
     '--disable-background-timer-throttling', '--disable-renderer-backgrounding',
-    PAGE,
+    ...(opts.args || []),
+    PAGE + (opts.query || ''),
   ], { stdio: ['ignore', 'pipe', 'pipe'] });
   const logs = [];
   proc.stdout.on('data', d => logs.push(d.toString()));
@@ -122,8 +124,10 @@ async function launchBrowser(i) {
     },
     kill() { try { proc.kill('SIGKILL'); } catch (_) {} cdp.close(); },
   };
-  // wait for net.js to have evaluated
-  await b.until('typeof window.H === "object" && typeof window.Net === "object"', 10000, 'harness');
+  // wait for net.js to have evaluated; on failure do not leave a headless
+  // chromium squatting on the debug port for the next run to attach to
+  try { await b.until('typeof window.H === "object" && typeof window.Net === "object"', 10000, 'harness'); }
+  catch (e) { b.kill(); throw e; }
   return b;
 }
 
@@ -305,6 +309,41 @@ async function launchBrowser(i) {
       }
       for (const b of rest) await b.until(`H.events("resolve").some(e=>e.a.turn===${T3})`, 8000, 'resolve after orphaned re-election');
       ok(true, 'the new arbiter declared the next turn -- no deadlock');
+    }
+
+    console.log('\n[no direct path at all: the server relay carries the match]');
+    {
+      // Two fresh clients that can never form a DataChannel: one has UDP for
+      // WebRTC switched off (what a corporate firewall / symmetric NAT looks
+      // like), the other has no RTCPeerConnection at all. Both must still be
+      // reachable at once through the RELAY path and play a full turn.
+      srv = startServer();
+      await waitServer();
+      const R = [
+        await launchBrowser(4, { args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp'] }),
+        await launchBrowser(5, { query: '?nortc=1' }),
+      ];
+      B.push(...R);
+      ok(await R[1].ev('typeof RTCPeerConnection === "undefined"'), 'client 6 really has no WebRTC');
+      await R[0].ev(`H.connect(${JSON.stringify(WSURL)}, "RELAY", "r1")`);
+      await R[1].ev(`H.connect(${JSON.stringify(WSURL)}, "RELAY", "r2")`);
+      for (const b of R) await b.until('Net.peers().length === 1 && Net.peers()[0].connected', 10000, 'relay reachability');
+      eq(await R[0].ev('Net.peers()[0].via'), 'relay', 'client 5 reaches its peer via the server relay');
+      eq(await R[1].ev('Net.peers()[0].via'), 'relay', 'client 6 reaches its peer via the server relay');
+      ok((await R[1].ev('Net.stats().peers[0].state')) !== 'connected', 'no direct link exists on the WebRTC-less client');
+      await R[0].until('Net.peers()[0].rtt !== null', 8000, 'relay rtt');
+      ok(true, 'RTT is measured over the relay too');
+      await Promise.all(R.map((b, i) => b.ev(`Net.sendMove(0, {tag:"relay-p${i + 1}"})`)));
+      for (const b of R) await b.until('H.events("move").filter(e=>e.a.turn===0).length === 1', 6000, 'relayed move');
+      eq(await R[1].ev('H.events("move").find(e=>e.a.turn===0).a.move.tag'), 'relay-p1', 'move arrived through the server, byte-identical');
+      eq(await R[0].ev('[Net.isArbiter(), Net.arbiterId()]'), [true, 1], 'arbiter is elected over relay-only links');
+      await R[0].ev('Net.sendResolve(0, {1:{tag:"relay-p1"},2:{tag:"relay-p2"}})');
+      for (const b of R) await b.until('H.events("resolve").some(e=>e.a.turn===0)', 6000, 'relayed resolve');
+      ok(true, 'a full lockstep turn resolved with zero peer-to-peer connectivity');
+      // and a peer that vanishes is noticed through the relay path as well
+      R[1].kill();
+      await R[0].until('Net.peers().length === 0 || !Net.peers()[0].connected', 20000, 'relay peer loss');
+      ok(true, 'losing a relay-only peer is detected');
     }
   } catch (err) {
     fail++;

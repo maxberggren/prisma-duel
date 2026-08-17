@@ -4,7 +4,7 @@ Two files matter:
 
 | file | what it is |
 |---|---|
-| `server.js` | Node + `ws`. Matchmaking, WebRTC signalling relay, static file server. **No game state, ever.** |
+| `server.js` | Node + `ws`. Matchmaking, WebRTC signalling relay, opaque gameplay relay for pairs with no direct path, static file server. **No game state, ever** — relayed blobs are forwarded, never parsed. |
 | `net.js` | Browser module, dependency-free plain JS, no DOM access. Inline it verbatim into `index.html`. Defines one global: `Net`. |
 
 Everything else here is tests (`test-signalling.js`, `test-headless.js`, `test-page.html`).
@@ -23,20 +23,26 @@ The server serves the game (it walks up from `out/net/` looking for an
 
 ## Architecture, in one paragraph
 
-The backend does matchmaking and relays SDP/ICE blobs. That is all it does.
-Once the mesh is up, every move, resolve, ping and chat message travels
-directly browser-to-browser over WebRTC DataChannels — 4 players means 6
-`RTCPeerConnection`s, one per pair, each with one **ordered, reliable**
-DataChannel (a lost move stalls the turn, so reliability beats latency here).
-Kill the server mid-match and the game keeps playing; the clients retry
-signalling in the background and rejoin when it comes back.
+The backend does matchmaking, relays SDP/ICE blobs, and relays gameplay blobs
+(`RELAY`) for pairs whose direct link is not up. Every pair has two transports,
+chosen per message: the WebRTC DataChannel when open, else the WebSocket relay.
+The relay is usable from the moment `JOINED` arrives, so nothing waits for ICE;
+a pair upgrades to direct the instant its channel opens and falls back if it
+closes. 4 players means 6 `RTCPeerConnection`s, one per pair, each with one
+**ordered, reliable** DataChannel (a lost move stalls the turn, so reliability
+beats latency here). Kill the server mid-match and directly-linked pairs keep
+playing; the clients retry signalling in the background and rejoin when it
+comes back. `JOINED` also carries `ice`, the iceServers list (STUN + optional
+TURN with per-seat HMAC credentials — `TURN_URLS`/`TURN_SECRET` env).
 
 ## Server protocol (JSON over WebSocket)
 
 ```
 client -> server   {t:'JOIN', room?, name?, resume?:{peerId,token}}
-                   {t:'SIGNAL', to, data}          {t:'PING', ts}     {t:'LEAVE'}
-server -> client   {t:'JOINED', room, selfId, token, roster, resumed}
+                   {t:'SIGNAL', to, data}          {t:'RELAY', to, data}
+                   {t:'PING', ts}                  {t:'LEAVE'}
+server -> client   {t:'JOINED', room, selfId, token, roster, resumed, ice}
+                   {t:'RELAY', from, data}
                    {t:'PEER_JOIN', peerId, name, roster}
                    {t:'PEER_LEAVE', peerId, roster}
                    {t:'SIGNAL', from, data}        {t:'PONG', ts}
@@ -73,7 +79,7 @@ Net.sendResolve(turn, moves)            // arbiter only; moves is {peerId: move}
 Net.sendChat(text)
 Net.selfId()      // number | null
 Net.isArbiter()   // lowest connected peerId === selfId
-Net.peers()       // [{peerId, name, rtt, connected}] — excludes self
+Net.peers()       // [{peerId, name, rtt, connected, via}] — excludes self; via: 'direct'|'relay'|null
 Net.disconnect()
 Net.room          // PROPERTY, not a call: the room code string
 Net.arbiterId()   // extra
@@ -103,7 +109,7 @@ the normative copy. The short version:
 
 `npm test` runs both suites.
 
-### `test-signalling.js` — 52 assertions, no browser
+### `test-signalling.js` — 60 assertions, no browser
 
 Real WebSocket clients against a real server process: room creation and
 upper-casing, peerId assignment, roster contents and ordering, `PEER_JOIN` /
@@ -114,7 +120,7 @@ control chars in names), disconnect grace, resume with a good and a forged
 token, id non-reuse, identical rosters across clients after the arbiter leaves,
 join rate limiting, room cleanup, static serving and path traversal.
 
-### `test-headless.js` — 45 assertions, four real Chromium processes
+### `test-headless.js` — 54 assertions, six real Chromium processes
 
 Genuinely end-to-end: it starts the server, launches 4 independent headless
 Chromium instances loading `net.js` over HTTP, and drives them via CDP. Real
@@ -136,6 +142,11 @@ traffic between four OS processes. Covered:
 * **worst case**: the arbiter crashes *while the server is also down*, so no
   `PEER_LEAVE` can ever arrive — the survivors still re-elect on their own timer
   and the next turn resolves. No deadlock.
+
+Also: a **relay-only pair** — one browser with UDP for WebRTC disabled, one with
+`RTCPeerConnection` removed — is reachable at once via the server, measures
+RTT, elects an arbiter and resolves a full turn with zero P2P connectivity, and
+notices when the other side vanishes.
 
 Not covered by any test: NAT traversal through real STUN/TURN (all peers are on
 one loopback host here), >4 players, and browsers other than Chromium.

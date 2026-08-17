@@ -7,19 +7,30 @@
  * ---------------------------------------------------------------------
  * ARCHITECTURE
  * ---------------------------------------------------------------------
- * The backend is used for matchmaking and WebRTC signalling ONLY. As soon as
- * the mesh is up, every byte of gameplay traffic travels directly between
- * browsers over WebRTC DataChannels. There is no authoritative server and no
- * game state anywhere except in the clients.
+ * The backend is used for matchmaking, WebRTC signalling and -- for pairs
+ * that cannot reach each other directly -- as a dumb relay. As soon as a
+ * direct link is up, gameplay traffic for that pair travels browser-to-browser
+ * over a WebRTC DataChannel. There is no authoritative server and no game
+ * state anywhere except in the clients; the relay forwards opaque blobs.
  *
  *   - Full mesh: 4 players => 6 RTCPeerConnections, one per pair.
  *   - One DataChannel per pair, ordered + reliable. A dropped move stalls the
  *     turn, so unreliable/unordered would be strictly worse here.
  *   - Glare avoidance: the peer with the LOWER peerId is always the offerer.
  *     The higher one waits and, if nothing arrives, nudges with NEED_OFFER.
- *   - If the signalling socket dies the mesh keeps running; the socket is
- *     retried in the background with backoff and resumes the SAME peerId
+ *   - Two transports per peer, picked per message:
+ *       direct  the DataChannel, when it is open;
+ *       relay   {t:'RELAY'} over the signalling WebSocket otherwise.
+ *     Nothing waits for ICE: from the moment JOINED arrives every peer is
+ *     reachable through the relay, and the pair upgrades itself to direct the
+ *     instant the channel opens (and falls back if it closes). Symmetric NAT,
+ *     UDP-blocked networks and browsers without WebRTC all just play a bit
+ *     laggier. The server hands out iceServers (STUN + optional TURN) in
+ *     JOINED, so a TURN relay is used before the WebSocket one where deployed.
+ *   - If the signalling socket dies the direct links keep running; the socket
+ *     is retried in the background with backoff and resumes the SAME peerId
  *     (server-issued resume token), so no roster churn is observed by peers.
+ *     Relay-only peers are unreachable for the duration and come back with it.
  *
  * ---------------------------------------------------------------------
  * THE LOCKSTEP CONTRACT  (the game depends on every word of this)
@@ -105,7 +116,7 @@
  *   Net.sendChat(text)                // extra, trivial
  *   Net.selfId() -> number|null
  *   Net.isArbiter() -> boolean
- *   Net.peers() -> [{peerId,name,rtt,connected}]   // excludes self
+ *   Net.peers() -> [{peerId,name,rtt,connected,via}]   // excludes self; via: 'direct'|'relay'|null
  *   Net.disconnect()
  *   Net.room                       // PROPERTY (string|null): the room code
  *   Net.arbiterId() -> number|null // extra: who the arbiter currently is
@@ -127,6 +138,8 @@ var Net = (function () {
     connectTimeoutMs: 20000, // per attempt before we call it a failure
     maxIceRestarts: 3,     // ICE restarts before a peer is written off
     peerDeadMs: 12000,     // link down this long => not an arbiter candidate
+    relayStaleMs: 7000,    // nothing heard via any path this long => peer presumed unreachable
+    directRetryMs: 45000,  // after giving up on ICE, try a direct link again this often
     wsRetryMs: 1000,       // signalling reconnect backoff base
     wsRetryMaxMs: 15000,
     maxBufferedTurns: 64,  // future-turn buffer depth
@@ -194,8 +207,10 @@ var Net = (function () {
     p = {
       peerId: peerId, name: name || ('P' + peerId),
       pc: null, dc: null,
-      state: 'new',        // new | connecting | connected | retrying | failed
-      connected: false,
+      state: 'new',        // direct link: new | connecting | connected | retrying | failed
+      direct: false,       // DataChannel open
+      connected: false,    // reachable by SOME transport (direct or relay)
+      via: null,           // 'direct' | 'relay' | null
       rtt: null,
       lastSeen: 0,
       downSince: now(),
@@ -205,7 +220,8 @@ var Net = (function () {
       makingOffer: false,
       needOfferTimer: null,
       connectTimer: null,
-      outQueue: []         // messages queued while the channel is opening
+      directRetryTimer: null,
+      outQueue: []         // messages queued while no transport is available
     };
     peers.set(peerId, p);
     return p;
@@ -214,10 +230,38 @@ var Net = (function () {
   function isOfferer(peerId) { return selfId !== null && selfId < peerId; }
 
   function alive(p) {
-    // arbiter candidacy: in roster and not written off
-    if (p.state === 'failed') return false;
+    // arbiter candidacy: reachable by some path, or only briefly out of touch.
+    // A failed DIRECT link is not disqualifying -- the relay may carry them.
     if (!p.connected && p.downSince && (now() - p.downSince) > CFG.peerDeadMs) return false;
     return true;
+  }
+
+  // Reachability by any transport: a path exists (open DataChannel, or the
+  // signalling socket for the relay) AND the peer has been heard from lately.
+  // Pings go out every pingMs to every roster peer over whichever path, and
+  // replies come from message handlers (not timers), so a backgrounded tab
+  // still answers promptly. Making the direct link obey the same freshness
+  // rule catches a channel that looks open but whose owner is gone, well
+  // before ICE gets round to saying so.
+  function reachable(p) {
+    if (!p.direct && !connected) return false;
+    return p.lastSeen > 0 && (now() - p.lastSeen) < CFG.relayStaleMs;
+  }
+  function updateReach(p, quiet) {
+    var r = reachable(p);
+    var via = p.direct ? 'direct' : (r ? 'relay' : null);
+    if (r === p.connected && via === p.via) return;
+    p.via = via;
+    if (r && !p.connected) p.downSince = 0;
+    if (!r && p.connected) p.downSince = now();
+    p.connected = r;
+    if (!quiet) {
+      if (via === 'direct') status('direct link to ' + p.name + ' (peer ' + p.peerId + ')');
+      else if (via === 'relay') status('reaching ' + p.name + ' via server relay');
+      else status('lost contact with ' + p.name);
+    }
+    refreshArbiter();
+    emitRoster();
   }
 
   function computeArbiter() {
@@ -288,7 +332,9 @@ var Net = (function () {
         scheduleReconnect();
         return;
       }
-      status('signalling lost -- mesh still live, retrying in background');
+      status('signalling lost -- direct links still live, retrying in background');
+      peers.forEach(function (p) { updateReach(p, true); });
+      refreshArbiter(); emitRoster();
       scheduleReconnect();
     };
   }
@@ -319,8 +365,16 @@ var Net = (function () {
         emitRoster();
         status(m.resumed ? 'signalling restored (room ' + roomCode + ')'
                          : 'joined room ' + roomCode + ' as peer ' + selfId);
-        // establish / repair links to everyone in the roster
-        rosterMap.forEach(function (r) { if (r.peerId !== selfId) ensureLink(r.peerId, r.name); });
+        if (Array.isArray(m.ice) && m.ice.length) CFG.iceServers = m.ice;
+        // establish / repair links to everyone in the roster; the relay path is
+        // live right now, so say hello and flush anything that queued up
+        rosterMap.forEach(function (r) {
+          if (r.peerId === selfId) return;
+          var p = peerRec(r.peerId, r.name);
+          p.iceRestarts = 0;
+          ensureLink(r.peerId, r.name);
+          greet(p);
+        });
         refreshArbiter();
         if (!connectSettled) {
           connectSettled = true;
@@ -334,7 +388,7 @@ var Net = (function () {
         if (m.roster) { rosterMap.clear(); m.roster.forEach(function (r) { rosterMap.set(r.peerId, { peerId: r.peerId, name: r.name }); }); }
         emitRoster();
         status(m.name + ' joined (peer ' + m.peerId + ')');
-        if (m.peerId !== selfId) ensureLink(m.peerId, m.name);
+        if (m.peerId !== selfId) { ensureLink(m.peerId, m.name); greet(peers.get(m.peerId)); }
         refreshArbiter();
         break;
       }
@@ -351,6 +405,11 @@ var Net = (function () {
       }
       case 'SIGNAL':
         if (Number.isInteger(m.from) && m.from !== selfId) onSignalData(m.from, m.data);
+        break;
+      case 'RELAY':
+        if (Number.isInteger(m.from) && m.from !== selfId && rosterMap.has(m.from)) {
+          onPeerMessage(peerRec(m.from, (rosterMap.get(m.from) || {}).name), m.data);
+        }
         break;
       case 'PONG': break;
       case 'ERROR':
@@ -371,13 +430,25 @@ var Net = (function () {
   function ensureLink(peerId, name) {
     var p = peerRec(peerId, name);
     if (p.state === 'connected' || p.state === 'connecting') return p;
+    clearTimeout(p.directRetryTimer); p.directRetryTimer = null;
     startLink(p, false);
     return p;
+  }
+
+  // Say hello over whatever path is up so the peer learns our name and marks
+  // us reachable at once, instead of waiting a ping interval.
+  function greet(p) {
+    if (!p) return;
+    send(p, { t: 'hello', name: myName, id: selfId });
+    var q = p.outQueue; p.outQueue = [];
+    for (var i = 0; i < q.length; i++) send(p, q[i]);
+    pingPeer(p);
   }
 
   function startLink(p, iceRestart) {
     if (shuttingDown) return;
     if (!p.pc) createPc(p);
+    if (!p.pc) return;          // no WebRTC here: the relay is all there is
     p.state = 'connecting';
     if (isOfferer(p.peerId)) {
       makeOffer(p, iceRestart);
@@ -443,18 +514,18 @@ var Net = (function () {
     p.dc = dc;
     dc.binaryType = 'arraybuffer';
     dc.onopen = function () {
-      p.state = 'connected'; p.connected = true; p.downSince = 0; p.iceRestarts = 0;
+      p.state = 'connected'; p.direct = true; p.iceRestarts = 0;
+      p.lastSeen = now();   // the channel opening is proof of life
       clearTimeout(p.needOfferTimer); clearTimeout(p.connectTimer);
-      status('connected to ' + p.name + ' (peer ' + p.peerId + ')');
-      dcSend(p, { t: 'hello', name: myName, id: selfId });
+      clearTimeout(p.directRetryTimer); p.directRetryTimer = null;
+      updateReach(p);
+      send(p, { t: 'hello', name: myName, id: selfId });
       var q = p.outQueue; p.outQueue = [];
-      for (var i = 0; i < q.length; i++) dcSend(p, q[i]);
+      for (var i = 0; i < q.length; i++) send(p, q[i]);
       pingPeer(p);
-      refreshArbiter();
-      emitRoster();
     };
     dc.onclose = function () {
-      if (p.connected) status('lost data channel to ' + p.name);
+      if (p.direct) status('lost direct link to ' + p.name + (connected ? ' -- relaying via server' : ''));
       markDown(p);
       emitRoster();
       // try to bring it back if the peer is still in the roster
@@ -468,11 +539,12 @@ var Net = (function () {
   }
 
   function markDown(p) {
-    if (p.connected) p.downSince = now();
-    else if (!p.downSince) p.downSince = now();
-    p.connected = false;
+    // the DIRECT link went down; whether the peer is still reachable is up to
+    // the relay, which updateReach() decides
+    p.direct = false;
     p.rtt = null;
-    refreshArbiter();
+    if (!p.downSince && !reachable(p)) p.downSince = now();
+    updateReach(p, true);
   }
 
   function restartLink(p) {
@@ -506,9 +578,18 @@ var Net = (function () {
     } else {
       p.state = 'failed';
       clearTimeout(p.needOfferTimer); clearTimeout(p.connectTimer);
-      status('giving up on peer ' + p.peerId + ' (' + p.name + '): ' + why + ' -- playing without a direct link');
+      status('no direct link to ' + p.name + ' (' + why + ') -- relaying via server');
       refreshArbiter();
       emitRoster();
+      // The relay carries the match; keep quietly trying for a direct link in
+      // case the network changed (VPN off, moved to wifi, TURN came back...).
+      clearTimeout(p.directRetryTimer);
+      p.directRetryTimer = setTimeout(function () {
+        p.directRetryTimer = null;
+        if (shuttingDown || p.direct || !rosterMap.has(p.peerId) || !connected) return;
+        p.iceRestarts = 0;
+        restartLink(p);
+      }, CFG.directRetryMs);
     }
   }
 
@@ -532,7 +613,7 @@ var Net = (function () {
     if (data.kind === 'need-offer') {
       if (isOfferer(from)) {
         if (!p.pc) createPc(p);
-        if (p.state !== 'connected') { p.state = 'connecting'; makeOffer(p, false); armConnectTimeout(p); }
+        if (p.pc && p.state !== 'connected') { p.state = 'connecting'; makeOffer(p, false); armConnectTimeout(p); }
       }
       return;
     }
@@ -552,8 +633,8 @@ var Net = (function () {
       // it -- ours wins, no rollback dance, no glare.
       if (isOfferer(from)) return;
       if (!p.pc) createPc(p);
+      var pc = p.pc; if (!pc) return;      // no WebRTC here; the relay carries this pair
       if (p.state !== 'connected') p.state = 'connecting';
-      var pc = p.pc; if (!pc) return;
       pc.setRemoteDescription(desc).then(function () {
         p.haveRemote = true;
         flushIce(p);
@@ -583,7 +664,7 @@ var Net = (function () {
   function destroyPeer(peerId, why) {
     var p = peers.get(peerId);
     if (!p) return;
-    clearTimeout(p.needOfferTimer); clearTimeout(p.connectTimer);
+    clearTimeout(p.needOfferTimer); clearTimeout(p.connectTimer); clearTimeout(p.directRetryTimer);
     detach(p);
     peers.delete(peerId);
     arbiterCache = null;
@@ -595,30 +676,37 @@ var Net = (function () {
     for (var i = 0; i < ids.length; i++) destroyPeer(ids[i], why);
   }
 
-  // -------------------------------------------------------- P2P messages
-  function dcSend(p, obj) {
-    if (!p.dc || p.dc.readyState !== 'open') {
-      if (obj.t === 'm' || obj.t === 'r') { p.outQueue.push(obj); if (p.outQueue.length > 64) p.outQueue.shift(); }
-      return false;
+  // -------------------------------------------------------- peer messages
+  // One send() per peer, transport chosen per message: the DataChannel when it
+  // is open, else the server relay when the socket is up, else queue (moves and
+  // resolves only -- pings/chat are not worth replaying).
+  function send(p, obj) {
+    if (p.dc && p.dc.readyState === 'open') {
+      try { p.dc.send(JSON.stringify(obj)); return true; }
+      catch (e) { logErr('dc.send', e); }
     }
-    try { p.dc.send(JSON.stringify(obj)); return true; }
-    catch (e) { logErr('dc.send', e); return false; }
+    if (connected && rosterMap.has(p.peerId) && wsSend({ t: 'RELAY', to: p.peerId, data: obj })) return true;
+    if (obj.t === 'm' || obj.t === 'r') { p.outQueue.push(obj); if (p.outQueue.length > 64) p.outQueue.shift(); }
+    return false;
   }
+  var dcSend = send;   // old name, kept for the test harness
 
   function broadcast(obj) {
-    peers.forEach(function (p) { dcSend(p, obj); });
+    peers.forEach(function (p) { send(p, obj); });
   }
 
   function onPeerMessage(p, raw) {
     var m;
-    try { m = JSON.parse(typeof raw === 'string' ? raw : String(raw)); } catch (e) { return; }
+    if (raw && typeof raw === 'object' && !(raw instanceof ArrayBuffer)) m = raw;   // relayed: already parsed
+    else { try { m = JSON.parse(typeof raw === 'string' ? raw : String(raw)); } catch (e) { return; } }
     if (!m || typeof m.t !== 'string') return;
     p.lastSeen = now();
+    if (!p.connected) updateReach(p);
     switch (m.t) {
       case 'hello':
         if (typeof m.name === 'string' && m.name) { p.name = m.name.slice(0, 24); emitRoster(); }
         break;
-      case 'p': dcSend(p, { t: 'q', ts: m.ts }); break;
+      case 'p': send(p, { t: 'q', ts: m.ts }); break;
       case 'q': {
         if (typeof m.ts === 'number') {
           var sample = now() - m.ts;
@@ -724,7 +812,10 @@ var Net = (function () {
 
   // ---------------------------------------------------------- RTT pings
   var pingTimer = setInterval(function () {
-    peers.forEach(function (p) { if (p.connected) pingPeer(p); });
+    // ping everyone in the roster over whichever path exists: on the relay this
+    // is also the liveness probe (see reachable()), so it must not wait for a
+    // direct link
+    peers.forEach(function (p) { if (rosterMap.has(p.peerId)) pingPeer(p); updateReach(p); });
     // aliveness is time-based (peerDeadMs), so the arbiter must be re-elected
     // on a clock, not only on events: if the signalling socket is down AND the
     // arbiter's browser dies, no PEER_LEAVE can ever arrive and this tick is
@@ -733,7 +824,7 @@ var Net = (function () {
   }, CFG.pingMs);
   if (pingTimer && pingTimer.unref) pingTimer.unref();
 
-  function pingPeer(p) { dcSend(p, { t: 'p', ts: now() }); }
+  function pingPeer(p) { send(p, { t: 'p', ts: now() }); }
 
   // ------------------------------------------------------------- public
   var api = {
@@ -825,7 +916,8 @@ var Net = (function () {
           peerId: r.peerId,
           name: (p && p.name) || r.name,
           rtt: p ? p.rtt : null,
-          connected: !!(p && p.connected)
+          connected: !!(p && p.connected),
+          via: p ? p.via : null
         });
       });
       out.sort(function (a, b) { return a.peerId - b.peerId; });
@@ -851,12 +943,12 @@ var Net = (function () {
         bufferedMoveTurns: futureMoves.size, bufferedResolveTurns: futureResolves.size,
         status: lastStatus,
         peers: Array.from(peers.values()).map(function (p) {
-          return { peerId: p.peerId, name: p.name, state: p.state, connected: p.connected, rtt: p.rtt };
+          return { peerId: p.peerId, name: p.name, state: p.state, connected: p.connected, via: p.via, rtt: p.rtt };
         })
       };
     },
     config: CFG,
-    _version: '1.0.0',
+    _version: '1.1.0',
     // TEST ONLY: feed a raw wire message in as if it had arrived from `peerId`.
     // Used by test-headless.js to exercise replay/dedupe/out-of-order paths
     // that are hard to provoke over a healthy network. Harmless in production.

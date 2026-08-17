@@ -28,6 +28,10 @@ services:
       - SERVICE_FQDN_PRISMA_8080
       - MAX_PLAYERS=${MAX_PLAYERS:-4}
       - RESUME_GRACE_MS=${RESUME_GRACE_MS:-15000}
+      # Optional TURN relay (see README "Playing across NATs"). Empty = STUN
+      # only + WebSocket relay fallback, which already works through any NAT.
+      - TURN_URLS=${TURN_URLS:-}
+      - TURN_SECRET=${TURN_SECRET:-}
 
     expose:
       - "8080"

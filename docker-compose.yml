@@ -5,8 +5,10 @@
 #   docker compose logs -f
 #
 # Then open http://<this machine's LAN IP>:8090/ on every machine that wants to
-# play. Only the handshake goes through here; the match itself runs peer-to-peer
-# between the browsers.
+# play. The handshake goes through here and the match runs peer-to-peer where
+# the browsers can reach each other; pairs that cannot (NAT, firewalls) are
+# relayed through this same service. For a lower-latency WebRTC relay add
+# docker-compose.turn.yml (coturn) -- see README.
 
 services:
   prisma:
@@ -26,6 +28,10 @@ services:
       MAX_PLAYERS: "${MAX_PLAYERS:-4}"
       # How long a dropped peer keeps its seat before the room forgets it.
       RESUME_GRACE_MS: "${RESUME_GRACE_MS:-15000}"
+      # Optional TURN relay handed to clients in the join handshake. Leave
+      # empty for STUN-only; docker-compose.turn.yml fills these in.
+      TURN_URLS: "${TURN_URLS:-}"
+      TURN_SECRET: "${TURN_SECRET:-}"
 
     restart: unless-stopped
 

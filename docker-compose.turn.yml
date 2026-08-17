@@ -1,0 +1,40 @@
+# Optional TURN relay (coturn) beside the game server.
+#
+#   TURN_HOST=game.example.com TURN_SECRET=$(openssl rand -hex 24) \
+#   docker compose -f docker-compose.yml -f docker-compose.turn.yml up -d
+#
+# Why: STUN gets most home routers to connect directly, and the game server's
+# WebSocket relay gets everyone else playing, but a TURN relay is a real
+# DataChannel with lower latency than bouncing JSON through Node. It needs
+# UDP 3478 (and the relay port range) reachable from the internet, so it runs
+# with host networking; that is the one thing Traefik cannot proxy for you.
+#
+# The game server hands out short-lived HMAC credentials for it in the join
+# handshake (coturn `use-auth-secret`), so no password lives in the client.
+
+services:
+  prisma:
+    environment:
+      TURN_URLS: "turn:${TURN_HOST:?set TURN_HOST to this machine's public hostname or IP}:3478?transport=udp,turn:${TURN_HOST}:3478?transport=tcp"
+      TURN_SECRET: "${TURN_SECRET:?set TURN_SECRET (openssl rand -hex 24)}"
+
+  coturn:
+    image: coturn/coturn:4
+    container_name: prisma-turn
+    network_mode: host
+    restart: unless-stopped
+    command:
+      - --listening-port=3478
+      - --realm=${TURN_HOST}
+      - --external-ip=${TURN_EXTERNAL_IP:-${TURN_HOST}}
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET}
+      - --min-port=${TURN_MIN_PORT:-49160}
+      - --max-port=${TURN_MAX_PORT:-49200}
+      - --fingerprint
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-multicast-peers
+      - --log-file=stdout
+      - --simple-log

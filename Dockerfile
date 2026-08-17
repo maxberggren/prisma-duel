@@ -1,9 +1,9 @@
 # PRISMA DUEL -- matchmaking + signalling server, and the game it serves.
 #
 # The container ships the whole client (index.html plus the ES modules under
-# src/) because the server doubles as the static host. Gameplay never reaches
-# this process: once the WebRTC mesh is up the peers talk directly, so the
-# container is idle for the duration of a match.
+# src/) because the server doubles as the static host. Once a direct WebRTC
+# link is up the peers talk directly and the container is idle for that pair;
+# pairs that cannot connect (NAT, firewalls) are relayed through it, opaquely.
 #
 #   docker build -t prisma-duel .
 #   docker run --rm --init -p 8090:8080 prisma-duel

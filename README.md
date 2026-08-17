@@ -24,9 +24,35 @@ node server.js                # PORT=8080 by default
 Then open the printed URL, enter a room code (or leave it blank to matchmake)
 and hit *Join room*. Up to 4 fighters per room.
 
-The server only does matchmaking and relays the WebRTC handshake. Once the mesh
-is up, **all gameplay traffic is peer-to-peer** — you can kill the server
-mid-match and play on.
+The server does matchmaking, relays the WebRTC handshake, and — for any pair of
+players that cannot reach each other directly — relays the gameplay messages
+themselves, unparsed. Where a direct link comes up, **that pair's traffic is
+peer-to-peer** and you can kill the server mid-match and play on; where it
+cannot (symmetric NAT, UDP blocked, no WebRTC), the pair plays through the
+server over the same WebSocket the page loaded from, which works anywhere the
+page does. Nothing waits for ICE: the relay is live from the moment you join and
+each pair upgrades to direct the instant its channel opens.
+
+### Playing across NATs: STUN, TURN, relay
+
+Out of the box the client uses Google's public STUN servers, so most home
+routers connect directly. For the rest, two fallbacks exist, in order:
+
+1. **TURN** (WebRTC's own relay, still a DataChannel, lower latency). Point the
+   server at a coturn instance and it hands out per-seat, expiring credentials
+   in the join handshake:
+
+   ```bash
+   TURN_URLS=turn:turn.example.com:3478,turns:turn.example.com:5349 \
+   TURN_SECRET=<the coturn static-auth-secret> \
+   node server/server.js
+   ```
+   (`TURN_USER`/`TURN_PASS` for a fixed credential, or `ICE_SERVERS='[...]'`
+   to pass any RTCIceServer list verbatim.) `docker-compose.turn.yml` runs coturn
+   next to the game: `TURN_HOST=your.public.hostname docker compose -f
+   docker-compose.yml -f docker-compose.turn.yml up -d`.
+2. **WebSocket relay through the game server** — always on, no configuration.
+   The HUD says `via server relay` for such peers.
 
 ## Docker
 
@@ -72,8 +98,8 @@ already handled:
 Leave `PORT` unset in Coolify. It has to agree with `EXPOSE`/`Ports Exposes`,
 and changing only one silently breaks routing.
 
-Only the handshake goes through the deployment — matches run browser to browser,
-so a small instance stays idle while people play.
+Direct pairs never touch the deployment after the handshake; relayed pairs
+send it a couple of small JSON messages a second. A small instance is plenty.
 
 ## How a turn works
 
@@ -146,12 +172,12 @@ node build.js --check          # index.html is in sync with src/
 python3 tools/boottest.py      # the shipped page actually boots and starts a match
 python3 tools/attracttest.py   # the start screen's demo hands the arena back cleanly
 node tools/mobilecheck.js      # layout at real phone/tablet/desktop viewports
-cd server && node test-signalling.js   # 52 assertions over every server path
-cd server && node test-headless.js     # 45 assertions, 4 real browsers,
-                                       # a real 6-link WebRTC mesh
+cd server && node test-signalling.js   # 60 assertions over every server path
+cd server && node test-headless.js     # 54 assertions, 6 real browsers,
+                                       # a real 6-link WebRTC mesh + a relay-only pair
 ```
 
-Current status: **36/36**, **52/52**, **45/45**. The browser suite spawns four
+Current status: **36/36**, **60/60**, **54/54**. The browser suite spawns four
 headless Chromium processes and needs a reasonably idle machine — under heavy
 CPU contention its final "mesh re-formed" step can time out.
 
