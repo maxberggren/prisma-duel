@@ -148,9 +148,8 @@
     background:rgba(34,96,138,.72);
     border-color:rgba(127,216,255,.52);
   }
-  .btn.primary:hover, .btn.commit:hover{background:rgba(44,120,170,.86)}
   .btn.primary:hover, .btn.commit:hover{
-    background:rgba(127,216,255,.24);border-color:rgba(127,216,255,.60);color:#fff}
+    background:rgba(44,120,170,.86);border-color:rgba(127,216,255,.66);color:#fff}
   .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);
@@ -220,9 +219,17 @@
   .modal::after{
     content:"";position:absolute;inset:0;border-radius:inherit;padding:1.2px;
     pointer-events:none;
-    background:linear-gradient(146deg,
-      rgba(255,255,255,.50) 0%, rgba(226,238,255,.26) 32%,
-      rgba(210,226,248,.12) 58%, rgba(196,216,244,.24) 100%);
+    /* A beam, not a paint job: white nearly all the way round, with the
+       faintest spectrum bleeding off it the way the lasers fringe coming
+       through glass. The tints stay close to white on purpose -- push their
+       saturation up and it stops reading as light and starts reading as a
+       gradient border. */
+    background:linear-gradient(118deg,
+      rgba(255,255,255,.92) 0%,   rgba(216,241,255,.78) 13%,
+      rgba(255,255,255,.95) 27%,  rgba(255,228,246,.76) 40%,
+      rgba(255,255,255,.95) 53%,  rgba(228,255,242,.76) 67%,
+      rgba(255,255,255,.95) 80%,  rgba(228,236,255,.78) 92%,
+      rgba(255,255,255,.92) 100%);
     -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
             mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
     -webkit-mask-composite:xor;      mask-composite:exclude;
