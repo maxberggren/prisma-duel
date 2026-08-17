@@ -160,6 +160,11 @@
     background:rgba(44,120,170,.86);border-color:rgba(127,216,255,.66);color:#fff}
   .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
+  /* Match over: the orders controls step aside for the rematch button. The
+     controls are hidden, not removed -- the next match needs them back. */
+  #oRematch{display:none}
+  .orders.over .split2, .orders.over .meter, .orders.over .two{display:none}
+  .orders.over #oRematch{display:block;width:100%}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);
        color:#9fb0c8;flex:0 1 auto;min-width:0;overflow:hidden}
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
@@ -384,6 +389,8 @@
           <span id="commitLbl">COMMIT</span><span class="kbd">↵</span>
         </button>
       </div>
+      <!-- shown in place of the controls once the field is settled -->
+      <button class="btn commit" id="oRematch" type="button">REMATCH</button>
     </div>
   </section>
 
@@ -394,6 +401,19 @@
 
 
   <!-- lobby -->
+  <!-- Rematch. One pilot asks; everyone else gets this over their screen and
+       either joins or goes back to the lobby. It starts when everyone still in
+       the room is in. -->
+  <div class="veil" id="rematch" style="display:none">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rmT">
+      <h1 id="rmT">Rematch</h1>
+      <p class="sub" id="rmSub">Same pilots, fresh arena</p>
+      <button class="btn primary" id="bRmJoin" type="button">JOIN REMATCH</button>
+      <button class="btn" id="bRmLeave" type="button">BACK TO LOBBY</button>
+      <div class="status" id="rmStatus"></div>
+    </div>
+  </div>
+
   <div class="veil" id="lobby">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lobbyT">
       <h1 id="lobbyT">Prisma</h1>
@@ -6027,15 +6047,11 @@ function banner(t, s) {
   $('banner').style.opacity = t ? 1 : 0;
 }
 
-/** Offer a rematch once the field is settled. */
+/** Offer a rematch once the field is settled. The controls are hidden, not
+    torn out: the next match is started in place, and it needs them back. */
 function showRematch() {
   if (ATT.on) return;      // the attract match restarts itself; it has no rematch
-  const body = document.querySelector('.orders .obody');
-  body.innerHTML = '';
-  const b = document.createElement('button');
-  b.className = 'btn commit'; b.type = 'button'; b.textContent = 'REMATCH';
-  b.addEventListener('click', () => location.reload());
-  body.appendChild(b);
+  $('orders').classList.add('over');
 }
 
 /* ------------------------------------------------------------- the clock */
@@ -6319,7 +6335,8 @@ function wireNet() {
     startResolve(moves);
   });
 
-  Net.on('chat', ({ text }) => {
+  Net.on('chat', ({ peerId, text }) => {
+    if (peerId !== Net.selfId() && rematchOnChat(peerId, text)) return;
     if (text.slice(0, RESYNC_REQ.length) === RESYNC_REQ) {
       if (NET.isArbiter() && NET.live && G.state) Net.sendChat(RESYNC_ST + JSON.stringify(serialiseState()));
       return;
@@ -6346,16 +6363,118 @@ function closeLobby() {
   ui.classList.remove('lobbyup');
 }
 
-$('bSolo').addEventListener('click', () => {
+function startSolo(seed) {
   const name = ($('lName').value || 'PILOT').toUpperCase().slice(0, 12);
   const players = [{ id: 0, name }, { id: 1, name: 'VEGA' }, { id: 2, name: 'ORION' }, { id: 3, name: 'LYRA' }];
   attractStop();
-  newGame(players, 20260815, 0);
+  rematchReset();
+  newGame(players, seed, 0);
   G.bots = new Set([1, 2, 3]);
   NET.live = false;
   closeLobby();
   beginPlan();
+}
+$('bSolo').addEventListener('click', () => startSolo(20260815));
+
+/* ================================================================= rematch
+   The field is settled and somebody wants to go again. Reloading the page
+   put everyone back through the lobby; instead the REMATCH button asks the
+   room, the others get a card over their screen with JOIN / BACK TO LOBBY,
+   and the moment everyone still in the room has joined, the arbiter starts
+   a fresh arena with the same pilots through the ordinary start handshake.
+   Whoever leaves simply drops out of the roster, and the rest can still go.
+   Practice has no room to ask: REMATCH just restarts against the bots. */
+const RM_REQ = '\u0001RMQ';     // {name}
+const RM_ACC = '\u0001RMA';     // (no payload)
+const RM_NO  = '\u0001RMN';     // (no payload) -- leaving
+const RM = { open: false, in: new Set(), asked: false, players: null, seed: 0 };
+
+function rematchReset() {
+  RM.open = false; RM.in.clear(); RM.asked = false;
+  $('rematch').style.display = 'none';
+  $('orders').classList.remove('over');
+  // the last match's fire and wreckage do not belong in the next one
+  vfx.fire.length = vfx.puffs.length = vfx.sparks.length = 0;
+  vfx.glows.length = vfx.wrecks.length = 0;
+  shakeAmp = fireShake = hitShake = 0;
+}
+
+/** Everyone from the last match who is still in the room -- the pilots a
+    rematch would be between, and the set that has to be all-in to start. */
+function rematchPool() {
+  if (!RM.players) return [];
+  const here = new Set(lobbyRoster.map(p => p.peerId));
+  return RM.players.filter(p => here.has(p.id));
+}
+
+function rematchStatus() {
+  const pool = rematchPool();
+  const inNames = pool.filter(p => RM.in.has(p.id)).map(p => p.id === Net.selfId() ? 'YOU' : p.name);
+  const waiting = pool.filter(p => !RM.in.has(p.id)).map(p => p.name);
+  $('rmStatus').textContent = (inNames.length + '/' + pool.length + ' in: ' + (inNames.join(', ') || '—'))
+    + (waiting.length ? ' — waiting for ' + waiting.join(', ') : '');
+  $('bRmJoin').style.display = RM.in.has(Net.selfId()) ? 'none' : '';
+  $('bRmJoin').textContent = 'JOIN REMATCH';
+}
+
+/** Show the card. `by` is who asked; null when it is us waiting. */
+function rematchShow(by) {
+  RM.open = true;
+  $('rmT').textContent = 'Rematch';
+  $('rmSub').textContent = by ? by + ' WANTS A REMATCH — SAME PILOTS, FRESH ARENA'
+                              : 'WAITING FOR THE OTHERS TO JOIN';
+  $('rematch').style.display = '';
+  rematchStatus();
+}
+
+/** Arbiter only: everyone still here is in -> start, through the normal handshake. */
+function rematchMaybeStart() {
+  if (!NET.live || !Net.isArbiter() || inMatch()) return;
+  const pool = rematchPool();
+  if (pool.length < 2 || !pool.every(p => RM.in.has(p.id))) return;
+  const players = pool.slice().sort((a, b) => a.id - b.id).map(p => ({ id: p.id, name: p.name }));
+  RM.seed = (RM.seed * 1103515245 + 12345) >>> 0;
+  const seed = (players.reduce((a, p) => (a * 31 + p.id) >>> 0, 20260815) ^ RM.seed) >>> 0;
+  const payload = { players, seed, sig: RULES_SIG };
+  Net.sendChat(START_TAG + JSON.stringify(payload));
+  startMatchFrom(payload);
+}
+
+function rematchJoin() {
+  if (!NET.live) return;
+  RM.in.add(Net.selfId());
+  if (!RM.asked) { RM.asked = true; Net.sendChat(RM_REQ + JSON.stringify({ name: selfShip() ? selfShip().name : 'PILOT' })); }
+  else Net.sendChat(RM_ACC);
+  rematchShow(null);
+  rematchMaybeStart();
+}
+
+$('oRematch').addEventListener('click', () => {
+  if (G.phase !== 'over') return;
+  if (!NET.live) { startSolo(((G.state && G.state.seed) || 20260815) + 7919); return; }
+  rematchJoin();
 });
+$('bRmJoin').addEventListener('click', () => rematchJoin());
+$('bRmLeave').addEventListener('click', () => {
+  if (NET.live) { try { Net.sendChat(RM_NO); Net.disconnect(); } catch (e) {} }
+  location.reload();
+});
+
+/** Rematch traffic rides the chat channel like the start handshake does. */
+function rematchOnChat(peerId, text) {
+  if (!NET.live || !RM.players) return false;
+  if (text.slice(0, RM_REQ.length) === RM_REQ) {
+    let name = 'A PILOT';
+    try { name = (JSON.parse(text.slice(RM_REQ.length)).name || name).toUpperCase(); } catch (e) {}
+    RM.asked = true; RM.in.add(peerId);
+    if (!RM.open) rematchShow(name); else rematchStatus();
+    rematchMaybeStart();
+    return true;
+  }
+  if (text.slice(0, RM_ACC.length) === RM_ACC) { RM.in.add(peerId); if (RM.open) rematchStatus(); rematchMaybeStart(); return true; }
+  if (text.slice(0, RM_NO.length) === RM_NO) { RM.in.delete(peerId); if (RM.open) rematchStatus(); return true; }
+  return false;
+}
 
 let lobbyRoster = [];
 
@@ -6385,7 +6504,7 @@ let desynced = false;
    the attract demo behind the lobby is a real match too, and it owns G.state
    from the moment the page loads. Asking G.state here is what silently made
    the START button dead and startMatchFrom() a no-op for everyone. */
-const inMatch = () => !!G.state && !ATT.on;
+const inMatch = () => !!G.state && !ATT.on && G.phase !== 'over';
 function startMatchFrom(payload) {
   if (inMatch()) return;                                 // already playing
   if (payload.sig && payload.sig !== RULES_SIG) {
@@ -6398,6 +6517,8 @@ function startMatchFrom(payload) {
   const selfIdx = players.findIndex(p => p.id === Net.selfId());
   if (selfIdx < 0) { setStatus('This match started without you.', true); return; }
   attractStop();
+  rematchReset();
+  RM.players = players;                       // who a rematch would be between
   newGame(players, payload.seed, selfIdx);
   NET.live = true;
   closeLobby();
@@ -6428,7 +6549,7 @@ $('bJoin').addEventListener('click', async () => {
     const { roster } = await Net.connect({ url, room, name });
     lobbyRoster = roster;
     wireNet();
-    Net.on('roster', r => { lobbyRoster = r; refreshLobby(); });
+    Net.on('roster', r => { lobbyRoster = r; refreshLobby(); if (RM.open) { rematchStatus(); rematchMaybeStart(); } });
     Net.on('chat', ({ text }) => {
       // the start handshake rides the chat channel so the netcode needs no
       // game-specific message type

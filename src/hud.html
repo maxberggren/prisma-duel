@@ -34,6 +34,8 @@
           <span id="commitLbl">COMMIT</span><span class="kbd">↵</span>
         </button>
       </div>
+      <!-- shown in place of the controls once the field is settled -->
+      <button class="btn commit" id="oRematch" type="button">REMATCH</button>
     </div>
   </section>
 
@@ -44,6 +46,19 @@
 
 
   <!-- lobby -->
+  <!-- Rematch. One pilot asks; everyone else gets this over their screen and
+       either joins or goes back to the lobby. It starts when everyone still in
+       the room is in. -->
+  <div class="veil" id="rematch" style="display:none">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="rmT">
+      <h1 id="rmT">Rematch</h1>
+      <p class="sub" id="rmSub">Same pilots, fresh arena</p>
+      <button class="btn primary" id="bRmJoin" type="button">JOIN REMATCH</button>
+      <button class="btn" id="bRmLeave" type="button">BACK TO LOBBY</button>
+      <div class="status" id="rmStatus"></div>
+    </div>
+  </div>
+
   <div class="veil" id="lobby">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lobbyT">
       <h1 id="lobbyT">Prisma</h1>

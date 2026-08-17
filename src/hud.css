@@ -152,6 +152,11 @@
     background:rgba(44,120,170,.86);border-color:rgba(127,216,255,.66);color:#fff}
   .btn.commit{margin-top:9px}
   .btn.commit.done{background:rgba(87,227,154,.16);border-color:rgba(87,227,154,.5);color:#d6ffe9}
+  /* Match over: the orders controls step aside for the rematch button. The
+     controls are hidden, not removed -- the next match needs them back. */
+  #oRematch{display:none}
+  .orders.over .split2, .orders.over .meter, .orders.over .two{display:none}
+  .orders.over #oRematch{display:block;width:100%}
   .kbd{font:10px/1 var(--mono);padding:3px 5px;border-radius:4px;background:rgba(255,255,255,.09);
        color:#9fb0c8;flex:0 1 auto;min-width:0;overflow:hidden}
   .two .btn{gap:6px;padding-left:8px;padding-right:8px}
