@@ -1437,7 +1437,11 @@ const ATT = {
   crowdMaxR: 0.80,     // and how far back the camera may go to hold them
   watchR: 0.74,        // how tight to sit on the ship that is about to go
   leadIn: 3.2,         // sim seconds of firefight before the kill lands
-  heatScale: 0.65,     // fireballs play at about two-thirds of real time
+  /* Fire, glows and sparks relative to the sim clock. It was ~24x (fireballs
+     near real time) and read as a quick flash over wreckage that then drifted
+     for half a minute -- two clocks in one explosion. 1 = the whole
+     detonation in the same slow motion as the parts it throws. */
+  heatBoost: 1,
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
   staging: false,
@@ -2048,9 +2052,10 @@ function attractFrame(dt) {
   if (G.phase === 'resolve' && G.ctx) {
     const before = G.state.ships.map(sh => sh.alive);
     stepResolve(sdt);
-    /* Smoke on the sim clock so it still lingers for turns; heat on its own,
-       so a detonation ignites and peaks while you are looking at it. */
-    vfxHeat = ATT.heatScale / Math.max(1e-6, ATT.scale);
+    /* One clock for the whole explosion: fire ages at heatBoost x the sim
+       clock the wreckage and debris move on, so the flash, the embers and the
+       parts all unfold together, in the same slow motion as the ships. */
+    vfxHeat = ATT.heatBoost;
     stepVfx(sdt);
     vfxHeat = 1;
     attractInterp();

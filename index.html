@@ -1305,7 +1305,85 @@ let beamHits = [];
 /* Beam quality. The damage trace must be identical on every peer, so it uses a
    fixed spectral sample count regardless of what the display is set to. */
 const SIM_RAYS = 16;
-const DISPLAY_RAYS = 96;
+/* Spectral samples per drawn beam. A dispersed fan is N discrete lines; after
+   a few reflections they have spread far enough apart to read as individual
+   rays instead of a rainbow. More samples close the gaps, at CPU cost in the
+   tracer -- so it is a setting: lean where the game has to keep up with a
+   frame rate, and its prettiest on the start screen, where the scene is slow
+   and nobody is waiting on it. */
+const BEAM_QUALITY = { play: 96, attract: 512 };   // attract: tier 1 of QUALITY_LADDER
+function displayRays() {
+  return (typeof ATT !== 'undefined' && ATT.on) ? BEAM_QUALITY.attract : BEAM_QUALITY.play;
+}
+/* Start-screen render budget. The demo is the prettiest thing the engine
+   draws and also the thing most likely to be left running on a laptop, so
+   its cost has its own knobs, separate from the match:
+     attractDprCap  device-pixel ratio the canvas is allowed while the lobby
+                    is up (the match uses up to 2). The lobby's veil and blur
+                    sit over the picture anyway.
+     attractEveryN  draw the demo on every Nth display frame (1 = all).
+   Any of these, and BEAM_QUALITY.attract, can be overridden from the URL for
+   measurement: ?rays=256&dprcap=1.5&everyn=2 (see tools/perfscene.js). */
+const RENDER = { attractDprCap: 1.5, attractEveryN: 1, locked: false };
+/* The start screen adapts. It opens at the top of this ladder and steps down
+   only when the display cannot keep its refresh rate -- so a machine that can
+   afford the whole picture gets it, and a laptop that cannot gets a version
+   that still moves smoothly, in the order that costs the least of what you
+   see: fewer device pixels under the veil first, then a thinner spectrum,
+   then every other display frame. Measured on a Radeon 780M at 2800x1322:
+   tier 0 ~18 ms GPU (40 fps), tier 1 ~11 ms (60 fps), tier 3 ~9 ms.
+   ?tier=N pins a tier; ?rays/?dprcap/?everyn pin single knobs (both lock the
+   governor), which is how tools/perfscene.js and a human A/B them. The
+   governor starts at QUALITY.top (tier 1) and only ever climbs back to it. */
+const QUALITY_LADDER = [
+  { dprCap: 2,   rays: 512, everyN: 1 },
+  { dprCap: 1.5, rays: 512, everyN: 1 },
+  { dprCap: 1.5, rays: 384, everyN: 1 },
+  { dprCap: 1.5, rays: 256, everyN: 1 },
+  { dprCap: 1.5, rays: 256, everyN: 2 },
+];
+/* `top` is the best tier the governor is allowed to climb to. Tier 0 exists
+   and can be pinned (?tier=0), but tiers 1-2 were judged the ones worth
+   showing: at 1.5x under the veil the picture is not visibly poorer and the
+   machine breathes. */
+const QUALITY = { tier: 1, top: 1, since: 0, failedAbove: -1, dts: [], lastEval: 0 };
+function applyTier(i) {
+  const t = QUALITY_LADDER[i]; QUALITY.tier = i; QUALITY.since = performance.now();
+  RENDER.attractDprCap = t.dprCap; RENDER.attractEveryN = t.everyN; BEAM_QUALITY.attract = t.rays;
+  QUALITY.dts.length = 0;
+}
+{
+  const q = new URLSearchParams(location.search);
+  if (q.has('tier')) { applyTier(Math.max(0, Math.min(QUALITY_LADDER.length - 1, parseInt(q.get('tier'), 10) || 0))); RENDER.locked = true; }
+  if (q.has('rays')) { BEAM_QUALITY.attract = Math.max(8, parseInt(q.get('rays'), 10) || BEAM_QUALITY.attract); RENDER.locked = true; }
+  if (q.has('dprcap')) { RENDER.attractDprCap = parseFloat(q.get('dprcap')) || RENDER.attractDprCap; RENDER.locked = true; }
+  if (q.has('everyn')) { RENDER.attractEveryN = Math.max(1, parseInt(q.get('everyn'), 10) || 1); RENDER.locked = true; }
+}
+/* Called once per rAF tick on the start screen with the raw interval. The
+   display's own period is taken as the 10th-percentile interval seen (16.7 ms
+   on a 60 Hz panel, 8.3 on 120), and "cannot keep up" means the mean interval
+   over the last two seconds runs more than 20% over it. Step down at once
+   (after a 3 s settle from the last change); step back up only after 15 s of
+   clean frames, and never above a tier that already failed in the last
+   minute -- so it cannot saw back and forth. */
+function qualityGovern(rawDt) {
+  if (RENDER.locked || !ATT.on || !(rawDt > 0)) return;
+  const now = performance.now();
+  QUALITY.dts.push(rawDt); if (QUALITY.dts.length > 240) QUALITY.dts.shift();
+  if (now - QUALITY.lastEval < 2000 || QUALITY.dts.length < 60) return;
+  QUALITY.lastEval = now;
+  const a = QUALITY.dts.slice().sort((x, y) => x - y);
+  const period = a[Math.floor(a.length * 0.10)];
+  const mean = a.reduce((x, y) => x + y, 0) / a.length;
+  const settled = now - QUALITY.since;
+  if (mean > period * 1.20 && QUALITY.tier < QUALITY_LADDER.length - 1 && settled > 3000) {
+    QUALITY.failedAbove = QUALITY.tier; QUALITY.failedAt = now;
+    applyTier(QUALITY.tier + 1);
+  } else if (mean < period * 1.03 && QUALITY.tier > QUALITY.top && settled > 15000 &&
+             !(QUALITY.failedAbove >= 0 && QUALITY.tier - 1 <= QUALITY.failedAbove && now - QUALITY.failedAt < 60000)) {
+    applyTier(QUALITY.tier - 1);
+  }
+}
 /* A beam has width. Every ray used to leave the muzzle from the same point in
    the same direction, so in open space the beam was a mathematically thin line:
    a hull either intercepted all of it or none, and a graze that clipped a
@@ -1333,7 +1411,7 @@ const BEAM_DIV = 0.55;
 function trace(collectHits) {
   segCount = 0; hotCount = 0;
   beamHits = [];
-  const N = collectHits ? SIM_RAYS : DISPLAY_RAYS;
+  const N = collectHits ? SIM_RAYS : displayRays();
   const pw = BEAM_POWER * 1.15 / N;
   traceRefPower = Math.max(pw, 1e-6);
 
@@ -3636,7 +3714,8 @@ function resetView() {
 let exporting = false;
 function resize() {
   if (exporting) return;
-  DPR = Math.min(window.devicePixelRatio || 1, 2);
+  const inLobby = typeof ATT !== 'undefined' && ATT.on;
+  DPR = Math.min(window.devicePixelRatio || 1, inLobby ? RENDER.attractDprCap : 2);
   const w = Math.max(2, Math.round(canvas.clientWidth * DPR));
   const h = Math.max(2, Math.round(canvas.clientHeight * DPR));
   if (w === W && h === H) return;
@@ -3733,6 +3812,7 @@ function render(dt) {
     nFireL++;
   }
 
+  perfMark('ground');
   /* ---- 0a. the ground layer -------------------------------------------
      Fire and wreckage lie on the deck, so they are drawn into their own target
      and composited underneath the ships by the environment pass. Drawing them
@@ -3810,6 +3890,7 @@ function render(dt) {
   }
 
 
+  perfMark('env');
   /* ---- 1. environment ---- */
   for (let i = 0; i < MAX_PRISM_DRAW; i++) {
     const P = arena.prisms[i];
@@ -3866,6 +3947,7 @@ function render(dt) {
     bindTex(u.uGround, fboGround.tex, 3);
   });
 
+  perfMark('smoke');
   /* ---- 1d. smoke (alpha, over the wreckage, beneath the beams) ---- */
   if (vfx.puffs.length) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
@@ -3880,6 +3962,7 @@ function render(dt) {
     gl.disable(gl.BLEND);
   }
 
+  perfMark('beams');
   /* ---- 2. beams (additive) ---- */
   gl.bindFramebuffer(gl.FRAMEBUFFER, fboScene.fb);
   gl.viewport(0, 0, W, H);
@@ -3910,6 +3993,7 @@ function render(dt) {
   gl.bindVertexArray(vaoHot);
   gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, hotCount);
 
+  perfMark('embers');
   /* ---- 2b. embers and the detonation's own light (additive) ---- */
   if (vfx.glows.length) {
     drawPuffs(pGlow, glowGL, vfx.glows, (p, o, a) => {
@@ -3934,6 +4018,7 @@ function render(dt) {
   gl.disable(gl.BLEND);
   gl.bindVertexArray(null);
 
+  perfMark('accum');
   /* ---- 2b. accumulate into the running mean ---- */
   const src = fboAcc[accIdx ^ 1];
   blit(pAccum, src, u => {
@@ -3944,6 +4029,7 @@ function render(dt) {
   accIdx ^= 1;
   accN++;
 
+  perfMark('bloom');
   /* ---- 3. bloom chain ---- */
   blit(pBright, mips[0], u => {
     bindTex(u.uTex, src.tex, 0);
@@ -3968,6 +4054,7 @@ function render(dt) {
   }
   gl.disable(gl.BLEND);
 
+  perfMark('streak');
   /* ---- 4. anamorphic streak ---- */
   blit(pStreak, fboStreakA, u => {
     bindTex(u.uTex, mips[1] ? mips[1].tex : mips[0].tex, 0);
@@ -3978,6 +4065,7 @@ function render(dt) {
     gl.uniform2f(u.uDir, 4.5 / fboStreakB.w, 0);
   });
 
+  perfMark('comp');
   /* ---- 5. composite ---- */
   blit(pComp, null, u => {
     bindTex(u.uScene, src.tex, 0);
@@ -3993,6 +4081,7 @@ function render(dt) {
     gl.uniform1f(u.uTime, time);
     gl.uniform2f(u.uRes, W, H);
   });
+  perfMark(null);
 }
 
 function uploadSegs() {
@@ -6420,7 +6509,11 @@ const ATT = {
   crowdMaxR: 0.80,     // and how far back the camera may go to hold them
   watchR: 0.74,        // how tight to sit on the ship that is about to go
   leadIn: 3.2,         // sim seconds of firefight before the kill lands
-  heatScale: 0.65,     // fireballs play at about two-thirds of real time
+  /* Fire, glows and sparks relative to the sim clock. It was ~24x (fireballs
+     near real time) and read as a quick flash over wreckage that then drifted
+     for half a minute -- two clocks in one explosion. 1 = the whole
+     detonation in the same slow motion as the parts it throws. */
+  heatBoost: 1,
   stageStep: 0.25,     // seconds of demo per casting step
   stageMax: 1100,      // casting steps per audition (~6 turns of battle)
   staging: false,
@@ -7031,9 +7124,10 @@ function attractFrame(dt) {
   if (G.phase === 'resolve' && G.ctx) {
     const before = G.state.ships.map(sh => sh.alive);
     stepResolve(sdt);
-    /* Smoke on the sim clock so it still lingers for turns; heat on its own,
-       so a detonation ignites and peaks while you are looking at it. */
-    vfxHeat = ATT.heatScale / Math.max(1e-6, ATT.scale);
+    /* One clock for the whole explosion: fire ages at heatBoost x the sim
+       clock the wreckage and debris move on, so the flash, the embers and the
+       parts all unfold together, in the same slow motion as the ships. */
+    vfxHeat = ATT.heatBoost;
     stepVfx(sdt);
     vfxHeat = 1;
     attractInterp();
@@ -7134,11 +7228,72 @@ if (window.ResizeObserver) {
 }
 
 let last = performance.now();
+
+/* ---------------------------------------------------------------- perf ----
+   ?perf=1 measures what a frame costs: the rAF interval, the CPU time in the
+   simulation and in issuing the render, and -- where the driver offers
+   EXT_disjoint_timer_query_webgl2 -- the GPU time the render actually took.
+   A report goes to the console every REPORT_S seconds and to window.__perf,
+   which is what tools/perfscene.js reads. Off unless asked: it costs a query
+   per frame. */
+const PERF = (() => {
+  const on = /[?&]perf=1/.test(location.search);
+  const ext = on ? gl.getExtension('EXT_disjoint_timer_query_webgl2') : null;
+  return { on, ext, REPORT_S: 5, t0: performance.now(), frames: [], gpu: [], pending: [], pass: {}, frameAcc: 0,
+           drawn: 0, last: null, reports: [] };
+})();
+/* GPU time is measured per render pass: render() calls perfMark(name) at
+   each pass boundary and perfMark(null) at the end. Only one timer query can
+   be open at a time, so each mark closes the previous pass's query and opens
+   the next; the per-frame total is the sum. Free when perf is off. */
+let perfOpen = null;
+function perfMark(name) {
+  if (!PERF.ext) return;
+  if (perfOpen) { gl.endQuery(PERF.ext.TIME_ELAPSED_EXT); PERF.pending.push(perfOpen); perfOpen = null; }
+  if (name) { const q = gl.createQuery(); q._pass = name; gl.beginQuery(PERF.ext.TIME_ELAPSED_EXT, q); perfOpen = q; }
+}
+function perfHarvest() {
+  if (!PERF.ext) return;
+  // queries resolve a few frames later; take what has come back, in order
+  while (PERF.pending.length) {
+    const h = PERF.pending[0];
+    if (!gl.getQueryParameter(h, gl.QUERY_RESULT_AVAILABLE)) break;
+    if (!gl.getParameter(PERF.ext.GPU_DISJOINT_EXT)) {
+      const ms = gl.getQueryParameter(h, gl.QUERY_RESULT) / 1e6;
+      (PERF.pass[h._pass] = PERF.pass[h._pass] || []).push(ms);
+      if (h._pass === 'comp') { PERF.gpu.push(PERF.frameAcc + ms); PERF.frameAcc = 0; } else PERF.frameAcc += ms;
+    }
+    gl.deleteQuery(h); PERF.pending.shift();
+  }
+}
+function perfReport() {
+  const q = (arr, p) => { if (!arr.length) return 0; const a = arr.slice().sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(p * a.length))]; };
+  const mean = arr => arr.length ? arr.reduce((x, y) => x + y, 0) / arr.length : 0;
+  const F = PERF.frames, span = (performance.now() - PERF.t0) / 1000;
+  const r = {
+    t: +span.toFixed(1), frames: F.length, drawn: PERF.drawn, fps: +(F.length / span).toFixed(1),
+    frameMs: { mean: +mean(F.map(f => f.dt)).toFixed(2), p50: +q(F.map(f => f.dt), 0.5).toFixed(2), p95: +q(F.map(f => f.dt), 0.95).toFixed(2), max: +q(F.map(f => f.dt), 1).toFixed(1) },
+    long20: F.filter(f => f.dt > 20).length, long34: F.filter(f => f.dt > 34).length,
+    cpuMs: { game: +mean(F.map(f => f.game)).toFixed(2), render: +mean(F.map(f => f.render)).toFixed(2), gameP95: +q(F.map(f => f.game), 0.95).toFixed(2), renderP95: +q(F.map(f => f.render), 0.95).toFixed(2) },
+    gpuMs: PERF.ext ? { mean: +mean(PERF.gpu).toFixed(2), p95: +q(PERF.gpu, 0.95).toFixed(2), max: +q(PERF.gpu, 1).toFixed(2), n: PERF.gpu.length } : null,
+    passMs: PERF.ext ? Object.fromEntries(Object.entries(PERF.pass).map(([k, v]) => [k, +mean(v).toFixed(2)])) : null,
+    scene: { W, H, DPR, segs: segCount, hot: hotCount, vfx: vfxLoad(), rays: displayRays(), attract: ATT.on, accN, tier: QUALITY.tier, everyN: RENDER.attractEveryN },
+  };
+  PERF.last = r; PERF.reports.push(r);
+  console.log('[perf] ' + JSON.stringify(r));
+  PERF.frames = []; PERF.gpu = []; PERF.pass = {}; PERF.drawn = 0; PERF.t0 = performance.now();
+}
+window.__perf = PERF;
+
 function frame(now) {
   const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  const rawDt = now - (PERF.lastNow || now); PERF.lastNow = now;
+  qualityGovern(rawDt);
   if (!ctxLost) {
     resize();
+    const tg0 = PERF.on ? performance.now() : 0;
     gameFrame(dt);
+    const tg1 = PERF.on ? performance.now() : 0;
     /* A converged still is finished: re-rendering it would blend un-jittered
        frames back in and undo the supersampling, and it burns the GPU forever.
        The attract screen opts out of the `resolve` clause entirely -- it is
@@ -7146,7 +7301,23 @@ function frame(now) {
     /* Holding the accumulator keeps accN permanently below ACC_MAX, so the
        "not converged yet" clause would demand a frame every single time. The
        attract screen therefore draws on exactly one condition: it asked to. */
-    if (ATT.on ? dirty : (dirty || G.phase === 'resolve' || accN < ACC_MAX)) render(dt);
+    let tr = 0;
+    /* attractEveryN: skip display frames on the start screen. Counted in rAF
+       ticks, not milliseconds, so the cadence stays even (every 2nd tick is
+       30 fps on a 60 Hz panel and 60 on a 120 Hz one) -- a time-based gate is
+       what produced the 33/50 ms alternation that read as judder. The sim
+       still advances by real elapsed time, so nothing slows down. */
+    PERF.tick = (PERF.tick || 0) + 1;
+    const skip = ATT.on && RENDER.attractEveryN > 1 && (PERF.tick % RENDER.attractEveryN) !== 0;
+    if (!skip && (ATT.on ? dirty : (dirty || G.phase === 'resolve' || accN < ACC_MAX))) {
+      const t0 = PERF.on ? performance.now() : 0;
+      render(dt);
+      if (PERF.on) { tr = performance.now() - t0; perfHarvest(); PERF.drawn++; }
+    }
+    if (PERF.on) {
+      PERF.frames.push({ dt: rawDt, game: tg1 - tg0, render: tr });
+      if (now - PERF.t0 > PERF.REPORT_S * 1000) perfReport();
+    }
   }
   requestAnimationFrame(frame);
 }
