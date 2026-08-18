@@ -15,7 +15,7 @@
      Icon and manifest hrefs are deliberately RELATIVE: the game is also opened
      straight off the filesystem (README: practice needs no server), and a
      root-relative href is a dead link there. -->
-<meta name="description" content="Turn-based laser dogfights in a mirrored arena of dichroic crystals. Refract your shot into a rainbow and hit pilots you had no line of sight to. Free in the browser.">
+<meta name="description" content="Turn-based laser dogfights in a mirrored arena of dichroic crystals — a free browser homage to Sean O'Connor's Critical Mass (1996). Drag a course, commit, watch the turn resolve.">
 <link rel="canonical" href="https://prisma.oooo.ws/">
 <meta name="theme-color" content="#05060a">
 <meta name="color-scheme" content="dark">
@@ -34,7 +34,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Prisma Duel">
 <meta property="og:title" content="Prisma Duel — Turn-Based Spectral Laser Dogfight">
-<meta property="og:description" content="The weapon is a real spectral ray tracer: fire through a dichroic crystal and your beam disperses into a rainbow that can kill people you never had a line of sight to. Free in the browser, up to four pilots.">
+<meta property="og:description" content="The weapon is a real spectral ray tracer: fire through a dichroic crystal and your beam disperses into a rainbow that can kill people you never had a line of sight to. Free in the browser, up to four pilots — in the spirit of Sean O'Connor's Critical Mass.">
 <meta property="og:url" content="https://prisma.oooo.ws/">
 <meta property="og:locale" content="en">
 <!-- Absolute, and PNG: X and Slack both refuse to resolve a relative og:image,
@@ -69,6 +69,18 @@
   "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 1, "maxValue": 4 },
   "inLanguage": "en",
   "isAccessibleForFree": true,
+  "keywords": "turn-based space combat, simultaneous turns, top-down space game, laser dogfight, browser game, Critical Mass, Sean O'Connor, games like Critical Mass",
+  "isBasedOn": {
+    "@type": "VideoGame",
+    "name": "Critical Mass",
+    "alternateName": "Critical Mass - war in space",
+    "author": { "@type": "Person", "name": "Sean O'Connor" },
+    "publisher": { "@type": "Organization", "name": "Sean O'Connor's Windows Games" },
+    "datePublished": "1996",
+    "gamePlatform": ["Microsoft Windows", "iOS", "Android"],
+    "url": "https://www.windowsgames.co.uk/critical.html",
+    "description": "Turn-based squadron space combat for Windows, first released in 1996: you drag a vector arrow from each ship's nose, end the turn, and every ship moves at once."
+  },
   "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD",
               "availability": "https://schema.org/InStock" },
   "author": { "@type": "Person", "name": "Max Berggren" }
@@ -417,6 +429,91 @@
   @media (prefers-reduced-motion:reduce){ *{transition-duration:.01ms !important} }
   .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
       clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+  /* --------------------------------------------------- the (?) and the manual */
+  /* A question mark on the corner of the start card. It has to be legible over
+     a live dogfight and it must not compete with PRACTICE, so it is a hairline
+     ring that only fills in under the pointer. */
+  .qmark{
+    position:absolute;top:13px;right:13px;width:26px;height:26px;padding:0;flex:none;z-index:2;
+    display:grid;place-items:center;
+    font:12px/1 var(--mono);color:var(--faint);
+    background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:50%;
+    cursor:pointer;
+    transition:color var(--dur),border-color var(--dur),background var(--dur);
+  }
+  .qmark:hover{color:var(--ink);border-color:rgba(127,216,255,.55);background:rgba(127,216,255,.10)}
+  .qmark:focus-visible{outline:2px solid rgba(127,216,255,.55);outline-offset:2px}
+  .qmark.close{font-size:16px;line-height:1}
+
+  .veil[hidden]{display:none}
+  /* The manual is a reading surface, so it takes the middle of the frame --
+     unlike the lobby, which steps aside to let the demo be seen. */
+  .veil.center{place-items:center;padding:0 14px;--vx:50%}
+  .guideveil{background:
+      radial-gradient(60% 70% at 50% 50%, rgba(3,4,8,.80) 0%, rgba(3,4,8,.68) 45%,
+                      rgba(3,4,8,.34) 74%, rgba(3,4,8,.06) 100%),
+      linear-gradient(180deg, rgba(3,4,8,.42), rgba(3,4,8,.10) 30%,
+                      rgba(3,4,8,.10) 70%, rgba(3,4,8,.42))}
+
+  /* Wider than the lobby card and denser behind the text: this one is read,
+     not glanced at. The article is the frame and does not scroll; .gbody does. */
+  .modal.guide{
+    width:min(690px,calc(100vw - 28px));max-height:min(86dvh,860px);
+    padding:0;overflow:hidden;display:flex;flex-direction:column;text-align:left;
+    background:linear-gradient(180deg,rgba(17,20,28,.86),rgba(9,11,16,.90));
+  }
+  .ghead{padding:22px 30px 15px;border-bottom:1px solid var(--line);flex:none}
+  .guide h2{margin:0 0 4px;font:600 17px/1.3 var(--sans);letter-spacing:.24em;text-transform:uppercase}
+  .guide .sub{margin:0}
+  .gbody{
+    padding:4px 30px 28px;overflow-y:auto;overscroll-behavior:contain;
+    /* A page of prose is the one thing here you are meant to be able to select
+       and to flick through with a thumb; the rest of the document forbids both. */
+    -webkit-user-select:text;user-select:text;touch-action:pan-y;
+    scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.20) transparent;
+    /* Text does not get to end in a half-cut line against the header rule: it
+       fades out as it goes under it, and again at the bottom edge, which also
+       says there is more below without spending a chevron on saying so. */
+    -webkit-mask-image:linear-gradient(180deg,transparent 0,#000 14px,
+                                       #000 calc(100% - 18px),transparent 100%);
+            mask-image:linear-gradient(180deg,transparent 0,#000 14px,
+                                       #000 calc(100% - 18px),transparent 100%);
+  }
+  .gbody::-webkit-scrollbar{width:10px}
+  .gbody::-webkit-scrollbar-thumb{background:rgba(255,255,255,.17);border-radius:6px;
+                                  border:3px solid transparent;background-clip:content-box}
+  .gbody::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28);background-clip:content-box}
+  .guide h3{
+    margin:22px 0 9px;padding-top:16px;border-top:1px solid var(--line);
+    font:10.5px/1.4 var(--mono);letter-spacing:.17em;text-transform:uppercase;color:var(--accent)
+  }
+  .guide p{margin:0 0 11px;font-size:13px;line-height:1.65;color:#c1cade}
+  .guide .lead{margin-top:18px;font-size:13.5px;color:#dee5f1}
+  .guide b,.guide strong{color:var(--ink);font-weight:600}
+  .guide em{color:#cfd8e8;font-style:italic}
+  .guide a{color:var(--accent);text-decoration:none;border-bottom:1px solid rgba(127,216,255,.38)}
+  .guide a:hover{border-bottom-color:var(--accent)}
+  .guide a:focus-visible{outline:2px solid rgba(127,216,255,.55);outline-offset:3px;border-radius:2px}
+  /* The keys, as a two-column list rather than a table: the left column is set
+     in the same mono the HUD uses for anything you press. */
+  .guide .keys{display:grid;grid-template-columns:auto 1fr;gap:5px 14px;margin:14px 0 4px}
+  .guide .keys dt{font:10px/1.5 var(--mono);letter-spacing:.1em;color:#cfd8e8;
+                  background:rgba(255,255,255,.05);border:1px solid var(--line);
+                  border-radius:5px;padding:2px 7px;justify-self:start;white-space:nowrap}
+  .guide .keys dd{margin:0;font-size:12.5px;line-height:1.9;color:var(--dim)}
+  .guide .foot{margin:22px 0 0;padding-top:14px;border-top:1px solid var(--line);
+               font:9.5px/1.7 var(--mono);letter-spacing:.08em;color:var(--faint)}
+
+  @media (max-width:760px){
+    .qmark{top:11px;right:11px}
+    .veil.center{padding:0 8px}
+    .modal.guide{width:calc(100vw - 16px);max-height:88dvh}
+    .ghead{padding:17px 18px 12px}
+    .guide h2{font-size:15px;letter-spacing:.18em}
+    .gbody{padding:2px 18px 22px}
+    .guide h3{margin-top:18px}
+  }
 /*#HUDCSS-END*/
 </style>
 </head>
@@ -487,6 +584,10 @@
 
   <div class="veil" id="lobby">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lobbyT">
+      <!-- The only thing on this card that is not about getting into a match:
+           the rules, and who the controls are borrowed from. -->
+      <button class="qmark" id="bHelp" type="button" aria-haspopup="dialog" aria-controls="guide"
+              title="How this game works — and the game it is an homage to">?</button>
       <h1 id="lobbyT">Prisma</h1>
       <p class="sub">Turn-based laser duelling</p>
 
@@ -509,6 +610,128 @@
 
       <div class="status" id="lStatus"></div>
     </div>
+  </div>
+
+
+  <!-- ============================================================= the manual
+       The rules, and the credit. It lives in the markup rather than in a
+       string in game.js for two reasons: a reader whose browser never gets a
+       WebGL2 context still gets every word of it, and so does a crawler, which
+       never runs the game. The (?) on the start card is the way in; so is
+       #how-it-works on the URL, which is what a shared link points at. -->
+  <div class="veil center guideveil" id="guide" hidden>
+    <article class="modal guide" role="dialog" aria-modal="true" aria-labelledby="gT" tabindex="-1">
+      <button class="qmark close" id="bGuideX" type="button" aria-label="Close">&#215;</button>
+
+      <header class="ghead">
+        <h2 id="gT">How Prisma Duel works</h2>
+        <p class="sub">Turn-based space combat &mdash; an homage to Critical Mass</p>
+      </header>
+
+      <!-- Only this scrolls. The card's light rim is painted on the article,
+           and an absolutely-positioned rim inside a scroller stretches to the
+           full scroll height and slides away with the text. -->
+      <div class="gbody">
+      <p class="lead">Prisma Duel is a free, top-down, turn-based space combat game that runs in a
+        browser. You fly one fighter in a mirrored arena strewn with dichroic crystals. Nothing
+        happens in real time: each turn you set a course, decide whether to fire, and commit &mdash;
+        then every pilot's orders resolve together over about four seconds, and you watch what your
+        guesses actually did.</p>
+
+      <h3 id="the-turn">The turn</h3>
+      <p>Everybody plans at the same time, against a clock. When the last pilot commits &mdash; or
+        the clock runs out, in which case your fighter simply holds its last course &mdash; the turn
+        executes for everyone at once. There is no initiative order and no waiting your turn. The
+        tension is that you are aiming at where someone will be in four seconds, not at where they
+        are now.</p>
+
+      <h3 id="the-control">One control, and it is out on the arena</h3>
+      <p>Drag the handle at the end of your course line. The direction you drag is your heading;
+        how far you drag is your speed. The arrow keys do the same job if you prefer them, with
+        <b>Shift</b> for a finer step when you are threading a shot through a crystal.</p>
+      <p>Speed is bought from the same power the laser capacitor wants. A long drag is a fast run
+        with nothing left to charge with; a short one is a tight turn that fills the capacitor. The
+        orders panel shows you the split, but nothing in that panel is settable &mdash; the drag is
+        the whole interface. Your course carries over between turns, so holding a curve is what
+        happens if you do nothing.</p>
+
+      <h3 id="the-laser">The laser</h3>
+      <p>The beam is welded to your nose. There is no turret, no lead indicator and no lock.
+        Damage is charged <b>per millisecond of dwell</b>: a graze costs a few points, and holding
+        somebody in the beam for a whole turn is fatal. Because hitting anything means turning to
+        track it, and turning is exactly what your throttle just made expensive, every shot is an
+        argument with your own speed.</p>
+      <p>Firing spends the entire capacitor and suppresses shield regeneration for that turn.
+        Shields absorb before hull, and they only come back on turns you keep the laser cold.</p>
+
+      <h3 id="the-arena">Crystals, mirrors and the closing walls</h3>
+      <p>Every crystal is cut differently &mdash; five to eight faces, each vertex at its own radius
+        and angle, generated from the arena seed &mdash; so no two arenas look alike. They are solid
+        cover, and they refract. Fire through one and your beam bends, disperses into a rainbow fan,
+        and can strike pilots who were never in your line of sight. The arena walls are mirrors, so
+        a bank shot is a real tactic, including the bank shot that comes back and hits you. Flying
+        into either is fatal.</p>
+      <p>From turn seven the box tightens. Once it is as small as it goes it begins to collapse,
+        hurting everyone still alive by an escalating amount, so two careful pilots cannot circle
+        each other forever.</p>
+
+      <h3 id="playing">Playing it</h3>
+      <p><b>Practice</b> puts you against three bots and needs no server at all. <b>Multiplayer</b>
+        takes up to four pilots: enter a room code, or leave it blank to be matched. Any pair of
+        players that can reach each other plays peer-to-peer, and any pair that cannot falls back to
+        a relay, so a match survives most networks.</p>
+
+      <dl class="keys">
+        <dt>Drag / Arrows</dt><dd>set your course &mdash; Shift for a fine step</dd>
+        <dt>F</dt><dd>arm the laser</dd>
+        <dt>Enter</dt><dd>commit your orders</dd>
+        <dt>0</dt><dd>reset the view</dd>
+        <dt>H</dt><dd>hide the interface</dd>
+        <dt>?</dt><dd>this page</dd>
+      </dl>
+
+      <h3 id="critical-mass">Where this game comes from: Critical Mass</h3>
+      <p>Prisma Duel is an homage to <b>Critical Mass</b>, the turn-based space combat game written
+        by the British programmer <b>Sean O'Connor</b> and released for Windows in early 1996. Its
+        forerunner was an Atari ST game he worked on between 1988 and 1993, and it was the most
+        ambitious thing he had built at the time &mdash; a lot of the work went into the AI rather
+        than the picture, on the reasoning that space is mostly black anyway.</p>
+      <p>You command a squadron of ships seen from directly overhead on a plain black field, with
+        minimal, almost vector-like graphics. You move each ship by <b>dragging an arrow out from
+        its nose</b>, and how far you can pull it depends on the ship, because acceleration is
+        limited &mdash; then you end the turn and everything moves together. The weapons are six
+        kinds of missile that home on the nearest target, which is why so many Critical Mass stories
+        end with somebody killing a friend. A ship that comes apart ejects its pilot, and the escape
+        pod is a little circle that can itself be shot. There are forty mission types: escort a
+        convoy, attack a starbase, defend Earth.</p>
+      <p>It went out as shareware, in the try-before-you-buy economy of the mid-nineties &mdash;
+        magazine cover disks, download sites &mdash; next to O'Connor's other games, <b>Slay</b>,
+        <b>Conquest</b> and <b>Firefight</b>. <em>PC Review</em> called it "more playable than many
+        multi-million dollar productions" in January 1996. Version 3.0 arrived in 2001 with
+        better-looking ships and a ship and mission designer, which is the version most people who
+        played it around the turn of the millennium actually remember, and it was rewritten again in
+        2004. It is still sold and still maintained today, for Windows, iPhone, iPad, Android and
+        Kindle.</p>
+      <p><a href="https://www.windowsgames.co.uk/critical.html" target="_blank" rel="noopener noreferrer">Critical
+        Mass at Sean O'Connor's Windows Games &rarr;</a></p>
+
+      <h3 id="homage">What is kept, and what is not</h3>
+      <p>Kept: the overhead view, the secret orders, the simultaneous resolution you sit and watch,
+        and above all the control &mdash; a course you drag out in front of the ship, with momentum
+        you have to plan around instead of a joystick you react with. That gesture is Critical
+        Mass's, and nothing else has ever felt quite like it.</p>
+      <p>Changed: one fighter each instead of a squadron; a real spectral ray tracer instead of
+        homing missiles, so the weapon is light that genuinely refracts and disperses through the
+        terrain; and lockstep peer-to-peer play in a browser tab, which was not something you could
+        do in 1996.</p>
+      <p>If you found this while searching for Critical Mass: go and get the real thing. It is
+        still there, it is still maintained, and it is still better at being itself. This is a love
+        letter, not a replacement.</p>
+
+      <p class="foot">Prisma Duel is an independent tribute. It is not affiliated with, endorsed by
+        or connected to Sean O'Connor or Windows Games Ltd.</p>
+      </div>
+    </article>
   </div>
 
 </div>
@@ -6285,6 +6508,9 @@ oCommit.addEventListener('click', commitOrders);
 
 addEventListener('keydown', ev => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  /* Reading the manual is not playing: ENTER would otherwise commit the turn
+     you are in the middle of looking up the rules for. */
+  if (!guideEl.hidden) return;
   const k = ev.key.toLowerCase();
   if (k === 'f') { if (!oFire.disabled) { G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true; } }
   else if (ev.key === 'Enter') commitOrders();
@@ -6446,6 +6672,47 @@ function startSolo(seed) {
   beginPlan();
 }
 $('bSolo').addEventListener('click', () => startSolo(20260815));
+
+/* =================================================================== manual
+   The (?) on the start card opens the rules and the credit. The words
+   themselves are in the markup, not here: they have to survive a browser that
+   never gets a WebGL2 context, and a crawler that never runs any of this.
+   #how-it-works on the URL opens it directly, which is what a shared link
+   points at -- replaceState rather than push, so Back still leaves the page
+   rather than closing a dialog. */
+const guideEl = $('guide');
+let guideFrom = null;
+
+function setHash(h) {
+  /* Opened straight off the filesystem this throws in some browsers, and the
+     manual is not worth taking the page down for. */
+  try { history.replaceState(null, '', h || location.pathname + location.search); } catch (_) {}
+}
+function openGuide() {
+  if (!guideEl.hidden) return;
+  guideFrom = document.activeElement;
+  guideEl.hidden = false;
+  guideEl.querySelector('.gbody').scrollTop = 0;
+  guideEl.querySelector('.guide').focus();
+  setHash('#how-it-works');
+}
+function closeGuide() {
+  if (guideEl.hidden) return;
+  guideEl.hidden = true;
+  setHash('');
+  if (guideFrom && guideFrom.focus) guideFrom.focus();
+  guideFrom = null;
+}
+$('bHelp').addEventListener('click', openGuide);
+$('bGuideX').addEventListener('click', closeGuide);
+/* the shade closes it, the sheet does not */
+guideEl.addEventListener('pointerdown', ev => { if (ev.target === guideEl) closeGuide(); });
+addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !guideEl.hidden) { closeGuide(); ev.preventDefault(); }
+  else if (ev.key === '?' && guideEl.hidden &&
+           !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) { openGuide(); ev.preventDefault(); }
+});
+if (/^#(how-it-works|critical-mass)$/.test(location.hash)) openGuide();
 
 /* ================================================================= rematch
    The field is settled and somebody wants to go again. Reloading the page

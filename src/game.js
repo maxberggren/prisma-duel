@@ -1122,6 +1122,9 @@ oCommit.addEventListener('click', commitOrders);
 
 addEventListener('keydown', ev => {
   if (/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) return;
+  /* Reading the manual is not playing: ENTER would otherwise commit the turn
+     you are in the middle of looking up the rules for. */
+  if (!guideEl.hidden) return;
   const k = ev.key.toLowerCase();
   if (k === 'f') { if (!oFire.disabled) { G.aim.fire = !G.aim.fire; syncOrderUI(); dirty = true; } }
   else if (ev.key === 'Enter') commitOrders();
@@ -1283,6 +1286,47 @@ function startSolo(seed) {
   beginPlan();
 }
 $('bSolo').addEventListener('click', () => startSolo(20260815));
+
+/* =================================================================== manual
+   The (?) on the start card opens the rules and the credit. The words
+   themselves are in the markup, not here: they have to survive a browser that
+   never gets a WebGL2 context, and a crawler that never runs any of this.
+   #how-it-works on the URL opens it directly, which is what a shared link
+   points at -- replaceState rather than push, so Back still leaves the page
+   rather than closing a dialog. */
+const guideEl = $('guide');
+let guideFrom = null;
+
+function setHash(h) {
+  /* Opened straight off the filesystem this throws in some browsers, and the
+     manual is not worth taking the page down for. */
+  try { history.replaceState(null, '', h || location.pathname + location.search); } catch (_) {}
+}
+function openGuide() {
+  if (!guideEl.hidden) return;
+  guideFrom = document.activeElement;
+  guideEl.hidden = false;
+  guideEl.querySelector('.gbody').scrollTop = 0;
+  guideEl.querySelector('.guide').focus();
+  setHash('#how-it-works');
+}
+function closeGuide() {
+  if (guideEl.hidden) return;
+  guideEl.hidden = true;
+  setHash('');
+  if (guideFrom && guideFrom.focus) guideFrom.focus();
+  guideFrom = null;
+}
+$('bHelp').addEventListener('click', openGuide);
+$('bGuideX').addEventListener('click', closeGuide);
+/* the shade closes it, the sheet does not */
+guideEl.addEventListener('pointerdown', ev => { if (ev.target === guideEl) closeGuide(); });
+addEventListener('keydown', ev => {
+  if (ev.key === 'Escape' && !guideEl.hidden) { closeGuide(); ev.preventDefault(); }
+  else if (ev.key === '?' && guideEl.hidden &&
+           !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName)) { openGuide(); ev.preventDefault(); }
+});
+if (/^#(how-it-works|critical-mass)$/.test(location.hash)) openGuide();
 
 /* ================================================================= rematch
    The field is settled and somebody wants to go again. Reloading the page

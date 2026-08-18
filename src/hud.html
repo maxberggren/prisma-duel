@@ -61,6 +61,10 @@
 
   <div class="veil" id="lobby">
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="lobbyT">
+      <!-- The only thing on this card that is not about getting into a match:
+           the rules, and who the controls are borrowed from. -->
+      <button class="qmark" id="bHelp" type="button" aria-haspopup="dialog" aria-controls="guide"
+              title="How this game works — and the game it is an homage to">?</button>
       <h1 id="lobbyT">Prisma</h1>
       <p class="sub">Turn-based laser duelling</p>
 
@@ -83,6 +87,128 @@
 
       <div class="status" id="lStatus"></div>
     </div>
+  </div>
+
+
+  <!-- ============================================================= the manual
+       The rules, and the credit. It lives in the markup rather than in a
+       string in game.js for two reasons: a reader whose browser never gets a
+       WebGL2 context still gets every word of it, and so does a crawler, which
+       never runs the game. The (?) on the start card is the way in; so is
+       #how-it-works on the URL, which is what a shared link points at. -->
+  <div class="veil center guideveil" id="guide" hidden>
+    <article class="modal guide" role="dialog" aria-modal="true" aria-labelledby="gT" tabindex="-1">
+      <button class="qmark close" id="bGuideX" type="button" aria-label="Close">&#215;</button>
+
+      <header class="ghead">
+        <h2 id="gT">How Prisma Duel works</h2>
+        <p class="sub">Turn-based space combat &mdash; an homage to Critical Mass</p>
+      </header>
+
+      <!-- Only this scrolls. The card's light rim is painted on the article,
+           and an absolutely-positioned rim inside a scroller stretches to the
+           full scroll height and slides away with the text. -->
+      <div class="gbody">
+      <p class="lead">Prisma Duel is a free, top-down, turn-based space combat game that runs in a
+        browser. You fly one fighter in a mirrored arena strewn with dichroic crystals. Nothing
+        happens in real time: each turn you set a course, decide whether to fire, and commit &mdash;
+        then every pilot's orders resolve together over about four seconds, and you watch what your
+        guesses actually did.</p>
+
+      <h3 id="the-turn">The turn</h3>
+      <p>Everybody plans at the same time, against a clock. When the last pilot commits &mdash; or
+        the clock runs out, in which case your fighter simply holds its last course &mdash; the turn
+        executes for everyone at once. There is no initiative order and no waiting your turn. The
+        tension is that you are aiming at where someone will be in four seconds, not at where they
+        are now.</p>
+
+      <h3 id="the-control">One control, and it is out on the arena</h3>
+      <p>Drag the handle at the end of your course line. The direction you drag is your heading;
+        how far you drag is your speed. The arrow keys do the same job if you prefer them, with
+        <b>Shift</b> for a finer step when you are threading a shot through a crystal.</p>
+      <p>Speed is bought from the same power the laser capacitor wants. A long drag is a fast run
+        with nothing left to charge with; a short one is a tight turn that fills the capacitor. The
+        orders panel shows you the split, but nothing in that panel is settable &mdash; the drag is
+        the whole interface. Your course carries over between turns, so holding a curve is what
+        happens if you do nothing.</p>
+
+      <h3 id="the-laser">The laser</h3>
+      <p>The beam is welded to your nose. There is no turret, no lead indicator and no lock.
+        Damage is charged <b>per millisecond of dwell</b>: a graze costs a few points, and holding
+        somebody in the beam for a whole turn is fatal. Because hitting anything means turning to
+        track it, and turning is exactly what your throttle just made expensive, every shot is an
+        argument with your own speed.</p>
+      <p>Firing spends the entire capacitor and suppresses shield regeneration for that turn.
+        Shields absorb before hull, and they only come back on turns you keep the laser cold.</p>
+
+      <h3 id="the-arena">Crystals, mirrors and the closing walls</h3>
+      <p>Every crystal is cut differently &mdash; five to eight faces, each vertex at its own radius
+        and angle, generated from the arena seed &mdash; so no two arenas look alike. They are solid
+        cover, and they refract. Fire through one and your beam bends, disperses into a rainbow fan,
+        and can strike pilots who were never in your line of sight. The arena walls are mirrors, so
+        a bank shot is a real tactic, including the bank shot that comes back and hits you. Flying
+        into either is fatal.</p>
+      <p>From turn seven the box tightens. Once it is as small as it goes it begins to collapse,
+        hurting everyone still alive by an escalating amount, so two careful pilots cannot circle
+        each other forever.</p>
+
+      <h3 id="playing">Playing it</h3>
+      <p><b>Practice</b> puts you against three bots and needs no server at all. <b>Multiplayer</b>
+        takes up to four pilots: enter a room code, or leave it blank to be matched. Any pair of
+        players that can reach each other plays peer-to-peer, and any pair that cannot falls back to
+        a relay, so a match survives most networks.</p>
+
+      <dl class="keys">
+        <dt>Drag / Arrows</dt><dd>set your course &mdash; Shift for a fine step</dd>
+        <dt>F</dt><dd>arm the laser</dd>
+        <dt>Enter</dt><dd>commit your orders</dd>
+        <dt>0</dt><dd>reset the view</dd>
+        <dt>H</dt><dd>hide the interface</dd>
+        <dt>?</dt><dd>this page</dd>
+      </dl>
+
+      <h3 id="critical-mass">Where this game comes from: Critical Mass</h3>
+      <p>Prisma Duel is an homage to <b>Critical Mass</b>, the turn-based space combat game written
+        by the British programmer <b>Sean O'Connor</b> and released for Windows in early 1996. Its
+        forerunner was an Atari ST game he worked on between 1988 and 1993, and it was the most
+        ambitious thing he had built at the time &mdash; a lot of the work went into the AI rather
+        than the picture, on the reasoning that space is mostly black anyway.</p>
+      <p>You command a squadron of ships seen from directly overhead on a plain black field, with
+        minimal, almost vector-like graphics. You move each ship by <b>dragging an arrow out from
+        its nose</b>, and how far you can pull it depends on the ship, because acceleration is
+        limited &mdash; then you end the turn and everything moves together. The weapons are six
+        kinds of missile that home on the nearest target, which is why so many Critical Mass stories
+        end with somebody killing a friend. A ship that comes apart ejects its pilot, and the escape
+        pod is a little circle that can itself be shot. There are forty mission types: escort a
+        convoy, attack a starbase, defend Earth.</p>
+      <p>It went out as shareware, in the try-before-you-buy economy of the mid-nineties &mdash;
+        magazine cover disks, download sites &mdash; next to O'Connor's other games, <b>Slay</b>,
+        <b>Conquest</b> and <b>Firefight</b>. <em>PC Review</em> called it "more playable than many
+        multi-million dollar productions" in January 1996. Version 3.0 arrived in 2001 with
+        better-looking ships and a ship and mission designer, which is the version most people who
+        played it around the turn of the millennium actually remember, and it was rewritten again in
+        2004. It is still sold and still maintained today, for Windows, iPhone, iPad, Android and
+        Kindle.</p>
+      <p><a href="https://www.windowsgames.co.uk/critical.html" target="_blank" rel="noopener noreferrer">Critical
+        Mass at Sean O'Connor's Windows Games &rarr;</a></p>
+
+      <h3 id="homage">What is kept, and what is not</h3>
+      <p>Kept: the overhead view, the secret orders, the simultaneous resolution you sit and watch,
+        and above all the control &mdash; a course you drag out in front of the ship, with momentum
+        you have to plan around instead of a joystick you react with. That gesture is Critical
+        Mass's, and nothing else has ever felt quite like it.</p>
+      <p>Changed: one fighter each instead of a squadron; a real spectral ray tracer instead of
+        homing missiles, so the weapon is light that genuinely refracts and disperses through the
+        terrain; and lockstep peer-to-peer play in a browser tab, which was not something you could
+        do in 1996.</p>
+      <p>If you found this while searching for Critical Mass: go and get the real thing. It is
+        still there, it is still maintained, and it is still better at being itself. This is a love
+        letter, not a replacement.</p>
+
+      <p class="foot">Prisma Duel is an independent tribute. It is not affiliated with, endorsed by
+        or connected to Sean O'Connor or Windows Games Ltd.</p>
+      </div>
+    </article>
   </div>
 
 </div>
