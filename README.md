@@ -7,6 +7,11 @@ generated from the arena seed -- so no two arenas look alike. Fire through one
 and your beam refracts, disperses into a rainbow fan, and can strike people who
 were never in your line of sight.
 
+It is an homage to Sean O'Connor's **Critical Mass** (Windows, 1996): the
+overhead view, the secret orders, the simultaneous resolution, and the course
+you drag out of the ship's nose are his. The (?) on the start card, and
+[/critical-mass](https://prisma.oooo.ws/critical-mass), tell that story.
+
 ![Prisma](docs/hero.png)
 
 ## Run it
@@ -142,14 +147,21 @@ src/core.test.js  36 tests: determinism, rules, and arena invariants
 src/net.js      WebRTC mesh + lockstep client
 src/game.js     turn loop, orders, preview, netcode glue
 src/hud.{css,html}
-server/         matchmaking + signalling only
-build.js        assembles index.html from src/  (node build.js [--check])
+pages/src/      the site's documents -- /how-it-works, /critical-mass,
+                /games-like-critical-mass, /spectral-ray-tracing, /multiplayer
+                -- as bodies with a JSON header; build.js wraps them into
+                pages/*.html, and server.js serves those at the clean URLs
+pages/site.css  turns the in-game manual's card into a page that scrolls;
+                the pages load src/hud.css first, so there is one type system
+server/         matchmaking + signalling, and the static host
+build.js        assembles index.html and pages/ from their sources
+                (node build.js [--check])
 tools/          render/measurement helpers used during development
 assets/         icons, and the picture a shared link shows
 site.webmanifest, robots.txt, sitemap.xml
 ```
 
-`index.html` is generated. Edit the files in `src/` and run `node build.js`.
+`index.html` and `pages/*.html` are generated. Edit `src/` and `pages/src/` and run `node build.js`.
 
 ## What a shared link looks like
 
@@ -177,7 +189,7 @@ out. It is drawn so that the parts carrying the idea are still solid colour at
 
 **Absolute URLs without a build-time domain.** A crawler does not run scripts,
 and X drops a relative `og:image` without saying so, so the tags have to be
-absolute in the file. They are written against `https://prisma.oooo.ws`, and
+absolute in the file. They are written against `https://prismaduel.com`, and
 `server.js` swaps that origin for whichever host actually served the request
 (`X-Forwarded-Host`/`-Proto` when behind a proxy). The same build is therefore
 correct on production, on a Coolify preview URL and on a laptop on the LAN, and
@@ -204,7 +216,7 @@ timed out both ended with identical state hashes on both peers.
 
 ```bash
 node src/core.test.js          # 36 assertions: rules, determinism, invariants
-node build.js --check          # index.html is in sync with src/
+node build.js --check          # index.html and pages/ are in sync with their sources
 python3 tools/boottest.py      # the shipped page actually boots and starts a match
 python3 tools/attracttest.py   # the start screen's demo hands the arena back cleanly
 node tools/mobilecheck.js      # layout at real phone/tablet/desktop viewports

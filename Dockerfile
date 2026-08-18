@@ -17,6 +17,7 @@ FROM node:22-alpine AS build
 WORKDIR /build
 COPY build.js index.html ./
 COPY src/ ./src/
+COPY pages/ ./pages/
 RUN node build.js --check \
     || (echo ">>> index.html was stale for this commit; rebuilding from src/" \
         && node build.js)
@@ -66,6 +67,9 @@ COPY --chown=root:root src/ ./src/
 # name. server.js serves them from STATIC_DIR beside index.html.
 COPY --chown=root:root assets/ ./assets/
 COPY --chown=root:root site.webmanifest robots.txt sitemap.xml ./
+# The site's documents: /how-it-works, /critical-mass and the rest. server.js
+# routes the clean URLs to pages/<slug>.html; they wear src/hud.css.
+COPY --from=build --chown=root:root /build/pages ./pages/
 COPY --from=build --chown=root:root /build/index.html ./index.html
 
 # STATIC_ROOT resolution walks up from server/ looking for an index.html, which

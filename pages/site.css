@@ -1,0 +1,119 @@
+/* The pages under /pages, as documents.
+   They load the game's own stylesheet first (src/hud.css) so a heading, a key
+   cap or a paragraph here is set by exactly the rule that sets it in the
+   in-game manual -- there is one place to change the type. What that
+   stylesheet also does is nail the document down (overflow hidden, no
+   selection, no touch scrolling), because a game is not a document. These are
+   documents, so this file undoes that, and lays the manual's card out as a
+   page that scrolls. */
+html,body{
+  height:auto;overflow:auto;overscroll-behavior:auto;touch-action:auto;
+  -webkit-user-select:text;user-select:text;-webkit-touch-callout:default;
+}
+body{
+  min-height:100dvh;margin:0;
+  /* the arena's charcoal, with the key light falling from above-left, as the
+     wall behind the game has -- so the page and the game read as one place */
+  background:
+    radial-gradient(90% 60% at 18% 0%, rgba(96,124,168,.16) 0%, rgba(96,124,168,0) 60%),
+    radial-gradient(70% 50% at 100% 100%, rgba(150,110,200,.08) 0%, rgba(150,110,200,0) 60%),
+    #05060a;
+  color:var(--ink);
+}
+.page{max-width:760px;margin:0 auto;padding:28px 16px 64px}
+.page > .modal.guide{
+  max-height:none;overflow:visible;display:block;
+  /* the card sits on the wall rather than floating over a fight, so it can
+     afford to be a touch more solid than the in-game manual */
+  background:linear-gradient(180deg,rgba(17,20,28,.94),rgba(9,11,16,.97));
+}
+.page .gbody{
+  overflow:visible;-webkit-mask-image:none;mask-image:none;
+  padding-bottom:30px;
+}
+/* The site's chrome, kept to two lines: where you are, and the way back to
+   the game. */
+.crumbs{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  margin:0 auto 14px;max-width:760px;padding:0 4px;
+  font:10.5px/1.6 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--faint)
+}
+.crumbs a{color:var(--dim);text-decoration:none;border-bottom:1px solid transparent}
+.crumbs a:hover{color:var(--ink);border-bottom-color:rgba(255,255,255,.25)}
+.crumbs .sep{opacity:.5}
+.crumbs .play{margin-left:auto;color:var(--accent);border-bottom-color:rgba(127,216,255,.38)}
+.crumbs .play:hover{border-bottom-color:var(--accent)}
+.guide h1{margin:0 0 4px;font:600 19px/1.3 var(--sans);letter-spacing:.22em;text-transform:uppercase}
+/* Sections are h2 here, because the page's h1 is the title; they wear the
+   in-game manual's h3 look, which is the section look. */
+.page .gbody h2{
+  margin:24px 0 9px;padding-top:16px;border-top:1px solid var(--line);scroll-margin-top:18px;
+  font:10.5px/1.4 var(--mono);letter-spacing:.17em;text-transform:uppercase;color:var(--accent)
+}
+.guide h3{scroll-margin-top:18px}
+.guide ul,.guide ol{margin:0 0 12px;padding-left:20px;color:#c1cade;font-size:13px;line-height:1.65}
+.guide li{margin:0 0 6px}
+.guide li b{color:var(--ink)}
+.guide blockquote{
+  margin:14px 0;padding:10px 16px;border-left:2px solid rgba(127,216,255,.45);
+  background:rgba(255,255,255,.03);border-radius:0 8px 8px 0;
+  font-size:13px;line-height:1.65;color:#cfd8e8;font-style:italic
+}
+.guide blockquote cite{display:block;margin-top:6px;font:9.5px/1.4 var(--mono);letter-spacing:.12em;
+  text-transform:uppercase;font-style:normal;color:var(--faint)}
+/* Code, in the HUD's mono, on the same glass. Long lines scroll inside the
+   block -- the page never scrolls sideways. */
+.guide pre{
+  margin:12px 0 14px;padding:12px 14px;overflow-x:auto;
+  background:rgba(0,0,0,.35);border:1px solid var(--line);border-radius:9px;
+  font:11.5px/1.55 var(--mono);color:#d5dcea;tab-size:2
+}
+.guide code{font:.92em/1 var(--mono);color:#dbe3f0;background:rgba(255,255,255,.06);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+.guide pre code{font:inherit;color:inherit;background:none;border:0;padding:0}
+.guide .c{color:#8d97ab}                    /* comment */
+.guide .k{color:#c9a7ff}                    /* keyword */
+.guide .n{color:#7fd8ff}                    /* number */
+.guide table{width:100%;border-collapse:collapse;margin:12px 0 16px;font-size:12.5px;line-height:1.5}
+.guide th{font:10px/1.5 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
+  text-align:left;padding:6px 8px;border-bottom:1px solid var(--line)}
+.guide td{padding:7px 8px;border-bottom:1px solid rgba(255,255,255,.06);color:#c1cade;vertical-align:top}
+.guide td:first-child{color:var(--ink);white-space:nowrap}
+.guide .tablewrap{overflow-x:auto}
+/* A figure: a live canvas or an SVG, framed, with the same rule under it that
+   the HUD's headers use, and its caption in the HUD's label mono. */
+.guide figure{margin:16px 0 20px}
+.guide figure canvas,.guide figure svg{
+  display:block;width:100%;height:auto;border-radius:9px;
+  background:#07080d;border:1px solid var(--line)
+}
+.guide figure canvas{touch-action:none;cursor:crosshair}
+.guide figcaption{margin-top:8px;font:10.5px/1.6 var(--mono);letter-spacing:.06em;color:var(--dim)}
+.guide figcaption b{color:#cfd8e8;font-weight:500}
+/* The little control strip under a live figure. */
+.ctl{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;margin-top:8px;
+  font:10.5px/1.6 var(--mono);letter-spacing:.06em;color:var(--dim)}
+.ctl label{display:flex;align-items:center;gap:8px}
+.ctl input[type=range]{width:140px;height:16px}
+.ctl output{color:var(--ink);font-variant-numeric:tabular-nums;min-width:5ch}
+.ctl button{
+  font:10px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:#cfd8e8;
+  background:rgba(255,255,255,.05);border:1px solid var(--line);border-radius:6px;padding:6px 10px;cursor:pointer
+}
+.ctl button:hover{border-color:rgba(127,216,255,.55);color:var(--ink)}
+.guide .cta{
+  display:inline-block;margin:6px 0 4px;padding:11px 18px;border-radius:9px;
+  font:600 11.5px/1 var(--sans);letter-spacing:.20em;text-transform:uppercase;
+  color:#06121a;background:linear-gradient(180deg,#a6e6ff,#7fd8ff);border:0;text-decoration:none
+}
+.guide .cta:hover{filter:brightness(1.06)}
+.guide .aside{font-size:12.5px;color:var(--dim)}
+.more{margin:0 auto;max-width:760px;padding:22px 4px 0;
+  font:10.5px/1.9 var(--mono);letter-spacing:.08em;color:var(--faint)}
+.more a{color:var(--dim);text-decoration:none;border-bottom:1px solid rgba(255,255,255,.14);margin-right:14px}
+.more a:hover{color:var(--ink)}
+@media (max-width:760px){
+  .page{padding:16px 8px 48px}
+  .guide h1{font-size:16px;letter-spacing:.16em}
+  .guide pre{font-size:11px}
+}

@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>How the laser works: a spectral ray tracer as a game weapon — Prisma Duel</title>
+<meta name="description" content="The physics and technique behind Prisma Duel's laser: a CPU spectral ray tracer with 96 wavelengths, Snell refraction, Fresnel splitting, total internal reflection, Cauchy dispersion, Beer–Lambert absorption, mirrored walls, an energy-preserving beam shader and deterministic per-millisecond damage. Every step with an interactive figure.">
+<link rel="canonical" href="https://prismaduel.com/spectral-ray-tracing">
+<meta name="theme-color" content="#05060a">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<link rel="icon" href="/assets/favicon.ico" sizes="32x32">
+<link rel="icon" href="/assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="Prisma Duel">
+<meta property="og:title" content="How the laser works: a spectral ray tracer as a game weapon">
+<meta property="og:description" content="The physics and technique behind Prisma Duel's laser: a CPU spectral ray tracer with 96 wavelengths, Snell refraction, Fresnel splitting, total internal reflection, Cauchy dispersion, Beer–Lambert absorption, mirrored walls, an energy-preserving beam shader and deterministic per-millisecond damage. Every step with an interactive figure.">
+<meta property="og:url" content="https://prismaduel.com/spectral-ray-tracing">
+<meta property="og:image" content="https://prismaduel.com/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="How the laser works: a spectral ray tracer as a game weapon">
+<meta name="twitter:description" content="The physics and technique behind Prisma Duel's laser: a CPU spectral ray tracer with 96 wavelengths, Snell refraction, Fresnel splitting, total internal reflection, Cauchy dispersion, Beer–Lambert absorption, mirrored walls, an energy-preserving beam shader and deterministic per-millisecond damage. Every step with an interactive figure.">
+<meta name="twitter:image" content="https://prismaduel.com/assets/og.png">
+<script type="application/ld+json">{
+ "@context": "https://schema.org",
+ "@type": "TechArticle",
+ "headline": "How the laser works: a spectral ray tracer as a game weapon",
+ "description": "The physics and technique behind Prisma Duel's laser: a CPU spectral ray tracer with 96 wavelengths, Snell refraction, Fresnel splitting, total internal reflection, Cauchy dispersion, Beer–Lambert absorption, mirrored walls, an energy-preserving beam shader and deterministic per-millisecond damage. Every step with an interactive figure.",
+ "url": "https://prismaduel.com/spectral-ray-tracing",
+ "inLanguage": "en",
+ "image": "https://prismaduel.com/assets/og.png",
+ "author": {
+  "@type": "Person",
+  "name": "Max Berggren"
+ },
+ "publisher": {
+  "@type": "Organization",
+  "name": "Prisma Duel",
+  "url": "https://prismaduel.com/"
+ },
+ "isPartOf": {
+  "@type": "WebSite",
+  "name": "Prisma Duel",
+  "url": "https://prismaduel.com/"
+ },
+ "about": {
+  "@type": "VideoGame",
+  "name": "Prisma Duel",
+  "url": "https://prismaduel.com/"
+ },
+ "proficiencyLevel": "Beginner",
+ "dependencies": "A browser; the figures are plain 2D canvas",
+ "keywords": "spectral ray tracing, dispersion, Snell's law, Fresnel equations, total internal reflection, Cauchy equation, WebGL beam rendering, deterministic simulation"
+}</script>
+<script type="application/ld+json">{
+ "@context": "https://schema.org",
+ "@type": "BreadcrumbList",
+ "itemListElement": [
+  {
+   "@type": "ListItem",
+   "position": 1,
+   "name": "Prisma Duel",
+   "item": "https://prismaduel.com/"
+  },
+  {
+   "@type": "ListItem",
+   "position": 2,
+   "name": "The ray tracer",
+   "item": "https://prismaduel.com/spectral-ray-tracing"
+  }
+ ]
+}</script>
+<link rel="stylesheet" href="/src/hud.css">
+<link rel="stylesheet" href="/pages/site.css">
+</head>
+<body>
+<nav class="crumbs" aria-label="Breadcrumb">
+  <a href="/">Prisma Duel</a><span class="sep">/</span><span>The ray tracer</span>
+  <a class="play" href="/">Play the game &rarr;</a>
+</nav>
+<main class="page">
+  <article class="modal guide">
+    <header class="ghead">
+      <h1>How the laser works</h1>
+      <p class="sub">A spectral ray tracer as a game weapon — Snell, Fresnel, Cauchy and 96 wavelengths, with live examples</p>
+    </header>
+    <div class="gbody">
+<p class="lead">In <a href="/">Prisma Duel</a> the weapon is light. Not a line with a hit test on it, but a
+  beam that is traced as light: <b>ninety-six wavelengths</b> leave the muzzle, each one bends by its own
+  amount when it meets a crystal, some of it reflects and some transmits at every face, it fades as it
+  crosses glass, it comes off the mirrored walls at 86%, and whatever lands on a hull is the damage. This
+  page walks through the whole thing, from a single wavelength to the shader that draws it. Every figure
+  is live &mdash; drag the sliders, drag on the tracer.</p>
+<p class="aside">The code shown is the game's own, lightly trimmed. It is all in one file, so you can read
+  the rest of it in the page source.</p>
+
+<h2 id="wavelength">1. One wavelength, and what colour it is</h2>
+<p>A ray in this tracer is not red or green or blue. It is a <em>wavelength</em>, in nanometres, somewhere
+  between 398 and 706 &mdash; the part of the spectrum a display can say anything useful about. To put it on
+  screen it has to become RGB, and the honest way to do that is the way the eye does: integrate against the
+  CIE 1931 colour-matching functions to get XYZ, then apply the sRGB matrix.</p>
+<pre><code><span class="c">// Wyman/Sloan/Shirley multi-lobe Gaussian fits of the CIE 1931 observer</span>
+<span class="k">function</span> cieXYZ(l) {
+  <span class="k">const</span> x = gauss(l, <span class="n">1.056</span>, <span class="n">599.8</span>, <span class="n">37.9</span>, <span class="n">31.0</span>) + gauss(l, <span class="n">0.362</span>, <span class="n">442.0</span>, <span class="n">16.0</span>, <span class="n">26.7</span>) + gauss(l, <span class="n">-0.065</span>, <span class="n">501.1</span>, <span class="n">20.4</span>, <span class="n">26.2</span>);
+  <span class="k">const</span> y = gauss(l, <span class="n">0.821</span>, <span class="n">568.8</span>, <span class="n">46.9</span>, <span class="n">40.5</span>) + gauss(l, <span class="n">0.286</span>, <span class="n">530.9</span>, <span class="n">16.3</span>, <span class="n">31.1</span>);
+  <span class="k">const</span> z = gauss(l, <span class="n">1.217</span>, <span class="n">437.0</span>, <span class="n">11.8</span>, <span class="n">36.0</span>) + gauss(l, <span class="n">0.681</span>, <span class="n">459.0</span>, <span class="n">26.0</span>, <span class="n">13.8</span>);
+  <span class="k">return</span> [x, y, z];
+}</code></pre>
+<p>Two details matter. Pure spectral colours lie <em>outside</em> the sRGB gamut, so the matrix hands back
+  negative components; clipping them to zero flattens violet and cyan into mush. Instead each colour is
+  desaturated just enough to bring it inside &mdash; add white until the smallest channel is zero &mdash;
+  which keeps its hue and its luminance. And the whole band is normalised so that a flat, equal-energy
+  spectrum integrates to neutral white. That normalisation is what makes a dispersed fan keep its true
+  luminance profile: bright in the yellow-green, dim at the violet end, exactly as a real rainbow is.</p>
+<figure>
+  <canvas id="fig-spectrum" aria-label="The CIE observer curves and the resulting colour strip"></canvas>
+  <div class="ctl">
+    <label>λ <input id="spec-lam" type="range" min="380" max="720" step="1" value="550"></label>
+    <output id="spec-out"></output>
+  </div>
+  <figcaption><b>Figure 1.</b> The three observer curves, and underneath them what each single wavelength
+    becomes after the matrix, the gamut fix and the normalisation. Slide to see the XYZ and RGB of one
+    wavelength. Outside 398&ndash;706 nm the eye's response is so weak that the game does not bother.</figcaption>
+</figure>
+
+<h2 id="snell">2. Snell's law: the bend at a face</h2>
+<p>When a ray reaches the face of a crystal it changes direction. Snell's law says
+  <code>n₁ sin θᵢ = n₂ sin θₜ</code>: the ratio of the sines is the ratio of the refractive indices. Going
+  into glass (n about 1.4) the ray bends <em>towards</em> the normal; coming out it bends away. Coming out
+  there is an angle beyond which <code>sin θₜ</code> would have to exceed 1, and nothing transmits at all
+  &mdash; <b>total internal reflection</b>. That is a big part of why light gets trapped and guided inside a
+  crystal, and why a shot into one at a shallow angle comes out somewhere you did not expect.</p>
+<figure>
+  <canvas id="fig-snell" aria-label="A ray meeting a flat interface, with its reflected and refracted parts"></canvas>
+  <div class="ctl">
+    <label>angle of incidence <input id="snell-deg" type="range" min="0" max="89" step="1" value="40"><output id="snell-deg-out"></output></label>
+    <label>n of the glass <input id="snell-n" type="range" min="1.05" max="2.0" step="0.01" value="1.39"><output id="snell-n-out"></output></label>
+    <label><input id="snell-leaving" type="checkbox"> leaving the glass</label>
+  </div>
+  <figcaption><b>Figure 2.</b> White is the incoming ray. The two that leave the face are drawn as bright as
+    the fraction of the power they carry: reflected in white, transmitted in blue. Tick <em>leaving</em> and
+    push the angle up to watch the transmitted ray disappear at the critical angle.</figcaption>
+</figure>
+
+<h2 id="fresnel">3. Fresnel: how much reflects, and how much goes through</h2>
+<p>Snell says <em>where</em>; Fresnel says <em>how much</em>. At every face a ray splits into a reflected part
+  and a transmitted part, and the split depends on the angle: head-on, a 1.4 glass reflects about 3%; at a
+  grazing angle it reflects nearly everything, which is why a lake is a mirror at sunset. The game uses the
+  full equations for the two polarisations and averages them, because a laser in this world is unpolarised
+  and because it costs nothing.</p>
+<pre><code><span class="k">const</span> Rs = ((n1 * cosi - nn * cost) / (n1 * cosi + nn * cost)) ** <span class="n">2</span>;
+<span class="k">const</span> Rp = ((n1 * cost - nn * cosi) / (n1 * cost + nn * cosi)) ** <span class="n">2</span>;
+R = clamp((Rs + Rp) * <span class="n">0.5</span>, <span class="n">0</span>, <span class="n">1</span>);        <span class="c">// unpolarised</span>
+<span class="k">if</span> (sin2t &gt; <span class="n">1</span>) R = <span class="n">1</span>;                       <span class="c">// total internal reflection</span></code></pre>
+<figure>
+  <canvas id="fig-fresnel" aria-label="Reflectance against angle of incidence"></canvas>
+  <div class="ctl">
+    <label>n <input id="fres-n" type="range" min="1.2" max="1.8" step="0.01" value="1.39"><output id="fres-n-out"></output></label>
+  </div>
+  <figcaption><b>Figure 3.</b> Reflectance against angle. Blue is the average the game uses going into
+    glass; the thin grey pair are the two polarisations, and the dip in the dashed one is Brewster's angle.
+    Yellow is the same ray trying to get <em>out</em>: it climbs to 100% at the critical angle and stays there.
+    This one curve is why aiming matters &mdash; past about 75&deg; a crystal is a mirror, not a prism.</figcaption>
+</figure>
+
+<h2 id="dispersion">4. Dispersion: why the rainbow</h2>
+<p>Everything above would be true of a grey ray. The rainbow happens because the refractive index is not
+  one number: it depends on wavelength. Violet bends more than red. The classic empirical form for glass is
+  Cauchy's equation, <code>n(λ) = A + B/λ²</code>, and the game uses it, written so that <code>A</code> is
+  the index at the sodium D line (589.3 nm) &mdash; the number a glass catalogue quotes &mdash; and
+  <code>B</code> is how strongly the crystal disperses:</p>
+<pre><code><span class="c">/** Cauchy dispersion for one prism: n(lambda) = A + B/lambda^2, lambda in um. */</span>
+<span class="k">function</span> iorAt(P, lam) {
+  <span class="k">const</span> um = lam * <span class="n">1e-3</span>;
+  <span class="k">return</span> P.ior + P.disp / (um * um) - P.disp / (<span class="n">0.5893</span> * <span class="n">0.5893</span>);
+}</code></pre>
+<p>Every crystal in an arena is generated with its own <code>ior</code> between 1.34 and 1.44 and its own
+  <code>disp</code> between 0.045 and 0.075, from the arena seed. That is deliberately more dispersive than
+  real optical glass (a heavy flint is around 0.01 in these units): the arena is small and a beam crosses a
+  crystal in a couple of hundred pixels, so the fan has to open fast to be visible at all.</p>
+<figure>
+  <canvas id="fig-cauchy" aria-label="Refractive index against wavelength"></canvas>
+  <div class="ctl">
+    <label>A (n at 589 nm) <input id="cauchy-a" type="range" min="1.30" max="1.50" step="0.005" value="1.39"><output id="cauchy-a-out"></output></label>
+    <label>B (dispersion) <input id="cauchy-b" type="range" min="0.000" max="0.100" step="0.001" value="0.060"><output id="cauchy-b-out"></output></label>
+    <output id="cauchy-out"></output>
+  </div>
+  <figcaption><b>Figure 4.</b> Index against wavelength, the curve coloured by the light it bends. The
+    shaded band is every crystal the game can generate. Set B to zero and the fan closes: every colour takes
+    the same path and the beam stays white.</figcaption>
+</figure>
+<p>How much rainbow you get is decided at the way in. Snell says the angular spread between red and violet
+  grows with the sine of the angle of incidence &mdash; a head-on shot barely disperses at all &mdash; but
+  past about 75&deg; Fresnel reflects most of the light before it can. So the shot the bots learn to take is
+  off-axis, and not so far off-axis that the glass turns mirror.</p>
+
+<h2 id="absorption">5. Absorption inside the glass</h2>
+<p>Light crossing a medium loses power exponentially with distance: Beer&ndash;Lambert. The game applies
+  <code>p *= exp(-0.55 · d)</code> along every segment inside a crystal. It is a small effect over one crossing
+  and a large one for light that gets trapped bouncing around inside by total internal reflection &mdash;
+  which is what stops a trapped ray living forever, and what makes the interior glow fade the way a real
+  guided beam does.</p>
+<figure>
+  <canvas id="fig-beer" aria-label="Power against distance inside glass"></canvas>
+  <figcaption><b>Figure 5.</b> Power remaining against distance travelled inside a crystal. A single crossing
+    costs 10&ndash;25%; five internal bounces cost most of it.</figcaption>
+</figure>
+
+<h2 id="tracer">6. Putting it together: the tracer</h2>
+<p>With those four rules, the tracer is short. Every firing ship emits <code>N</code> rays; each ray is a
+  wavelength; each ray is pushed on a stack as <code>[x, y, dx, dy, power, depth, insidePrism]</code>; and the
+  loop pops rays until the stack is empty, finding the nearest thing each one hits:</p>
+<ul>
+  <li><b>a hull</b> &mdash; the ray is absorbed and, on the damage pass, recorded;</li>
+  <li><b>a mirrored wall</b> &mdash; reflect it, times 0.86, and push it back;</li>
+  <li><b>a crystal face</b> &mdash; compute <code>n(λ)</code>, Fresnel, and push <em>two</em> rays: the reflected
+    one with <code>p·R</code> and, unless it is totally internally reflected, the transmitted one with
+    <code>p·T</code> in the refracted direction.</li>
+</ul>
+<pre><code><span class="k">while</span> (stack.length) {
+  <span class="k">let</span> [x, y, ux, uy, p, depth, inPrism, dist] = stack.pop();
+  <span class="k">if</span> (p &lt; traceRefPower * <span class="n">0.006</span> || depth &gt; MAX_BOUNCE) <span class="k">continue</span>;   <span class="c">// too dim, or 9 bounces deep</span>
+  <span class="k">const</span> h = sceneHit(x, y, ux, uy, ...);
+  <span class="k">if</span> (inPrism &gt;= <span class="n">0</span>) p *= Math.exp(-h.t * <span class="n">0.55</span>);                    <span class="c">// Beer–Lambert</span>
+  pushSeg(x, y, hx, hy, r, g, b, p, ...);                            <span class="c">// what the GPU draws</span>
+  <span class="k">if</span> (h.kind === HULL)   { <span class="k">if</span> (collectHits) beamHits.push({...}); <span class="k">continue</span>; }
+  <span class="k">if</span> (h.kind === WALL)   { stack.push([..., p * WALL_REFLECT, depth + <span class="n">1</span>, ...]); <span class="k">continue</span>; }
+  <span class="c">// a crystal face: Fresnel split into a reflected and a refracted ray</span>
+  <span class="k">const</span> nGlass = iorAt(P, lam);  ...
+  <span class="k">if</span> (p * R &gt; cutoff) stack.push([..., p * R, depth + <span class="n">1</span>, inPrism]);
+  <span class="k">if</span> (hasT &amp;&amp; p * T &gt; cutoff) stack.push([..., p * T, depth + <span class="n">1</span>, entering ? h.idx : ...]);
+}</code></pre>
+<p>Two thresholds keep it bounded: a ray below 0.6% of a fresh ray's power is dropped, and nothing goes
+  deeper than nine bounces. Every segment a ray travels is appended to a flat <code>Float32Array</code>
+  &mdash; up to 90,000 of them &mdash; and handed to the GPU as one instanced draw. Here is that loop, in two
+  dimensions, on one crystal:</p>
+<figure>
+  <canvas id="fig-tracer" aria-label="A live 2D spectral ray tracer: a laser, a crystal and mirrored walls"></canvas>
+  <div class="ctl">
+    <label>rays <input id="tr-rays" type="range" min="4" max="512" step="1" value="96"><output id="tr-rays-out"></output></label>
+    <label>n <input id="tr-ior" type="range" min="1.30" max="1.60" step="0.005" value="1.39"><output id="tr-ior-out"></output></label>
+    <label>dispersion <input id="tr-disp" type="range" min="0" max="0.10" step="0.001" value="0.060"><output id="tr-disp-out"></output></label>
+    <label><input id="tr-jitter" type="checkbox" checked> jitter</label>
+    <label><input id="tr-mirror" type="checkbox" checked> mirrored walls</label>
+    <button id="tr-new" type="button">new crystal</button>
+  </div>
+  <output id="tracer-out" class="ctl"></output>
+  <figcaption><b>Figure 6.</b> Drag on the picture to aim. This is the game's tracer loop, in miniature: N
+    wavelengths, Fresnel splitting at every face, total internal reflection, Cauchy dispersion, Beer&ndash;Lambert
+    inside the glass, and walls at 86%. Try a shallow shot into a face for a wide fan; try a steep one to
+    watch the face turn into a mirror; set rays to 8 to see what a fan is made of; untick the walls to see
+    the fan on its own, and tick them again to see why an arena full of mirrors is a dangerous place.</figcaption>
+</figure>
+
+<h2 id="sampling">7. Sampling: why the fan is a wash, not a comb</h2>
+<p>A dispersed fan is, in truth, N discrete lines &mdash; one per wavelength. Space them evenly and, after a
+  couple of bounces have spread them apart, they read as a comb of coloured rays instead of a rainbow. The
+  fix is the usual one in rendering: stratify the wavelengths, then jitter each within its stratum. The
+  jitter must be deterministic &mdash; the physics runs on every peer &mdash; so it comes from a van der
+  Corput sequence rather than <code>Math.random</code>:</p>
+<pre><code><span class="k">const</span> u   = (k + (vdc(k + <span class="n">1</span>) - <span class="n">0.5</span>) * <span class="n">0.9</span>) / (N - <span class="n">1</span>);   <span class="c">// stratified + low-discrepancy jitter</span>
+<span class="k">const</span> lam = SPEC_LO + clamp(u, <span class="n">0</span>, <span class="n">1</span>) * (SPEC_HI - SPEC_LO);</code></pre>
+<p>Untick <em>jitter</em> in Figure 6 and drop the ray count to see the comb. In the game the drawn beam uses
+  96 rays during a match and 512 on the start screen, where nothing is waiting on the CPU; the quality
+  governor steps that down on a machine that cannot hold its frame rate.</p>
+
+<h2 id="damage">8. Damage is dwell, and it is deterministic</h2>
+<p>The same tracer runs twice. The display pass, above, is allowed to vary. The <b>damage pass</b> is not:
+  it always uses exactly 16 rays, because every peer in a multiplayer match must compute the same damage from
+  the same orders with no server to arbitrate. Once per substep &mdash; there are 96 in a four-second turn
+  &mdash; every hit ray deposits <code>power × milliseconds × DPS</code> into the hull it landed on. Damage
+  is therefore literally per millisecond of dwell: a beam that sweeps across a ship for a tenth of a second
+  does a tenth of a second's worth.</p>
+<p>The 16 damage rays are also spread across the beam's <em>waist</em>, on a base-3 van der Corput sequence
+  so it is decorrelated from the wavelength one. Every ray used to leave the muzzle from the same point, so
+  the beam was a mathematically thin line: a hull intercepted all of it or none, and a graze that clipped a
+  wingtip did as much damage as a shot down the throat. Now damage is proportional to how much of the beam
+  the ship actually blocks:</p>
+<figure>
+  <canvas id="fig-waist" aria-label="Sixteen rays across the beam waist, some intercepted by a hull"></canvas>
+  <div class="ctl">
+    <label>hull offset <input id="waist-off" type="range" min="0" max="1.3" step="0.01" value="1.08"><output id="waist-off-out"></output></label>
+    <output id="waist-out"></output>
+  </div>
+  <figcaption><b>Figure 7.</b> The damage rays across the waist and a hull sliding across the beam. Bright
+    rays land. The waist is 0.0101 world units against a hull radius of 0.046, so a clean hit still catches
+    every ray at any range &mdash; the game does not lose damage with distance, on purpose: a range penalty
+    was measured to suppress bank shots through crystals fivefold, and killed the mechanic.</figcaption>
+</figure>
+<p>Because the tracer's power already has every real loss taken out of it &mdash; Fresnel at each face,
+  absorption inside glass, the walls' 86% &mdash; a ray that arrives weakened does proportionally less. A
+  fan through a crystal is many faint rays; a bank shot off two walls is 74% of a direct one. No separate
+  damage table exists.</p>
+
+<h2 id="drawing">9. Drawing it so it looks like light</h2>
+<p>The segments go to a WebGL2 shader as instanced quads, each with its colour, its power and whether it
+  is inside glass. The core of a laser is far thinner than a pixel, and point-sampling something thinner
+  than a pixel scintillates as it moves. So the shader draws a Gaussian core <em>convolved with the pixel
+  footprint</em> &mdash; the physical width added in quadrature to the pixel's &mdash; and divides the peak
+  by the widening, so the flux carried by the line is constant however thin it gets. It measures the exact
+  screen footprint of the local beam frame with the analytic gradient rather than <code>fwidth()</code>, so
+  a beam at 45&deg; is exactly as thick as one on an axis.</p>
+<pre><code><span class="c">// core: pixel-footprint-convolved gaussian, energy preserving</span>
+<span class="k">float</span> s0   = uCore * <span class="n">0.50</span> * sqrt(vSpread);   <span class="c">// physical sigma</span>
+<span class="k">float</span> sp   = fwy   * <span class="n">0.42</span>;                  <span class="c">// the pixel's</span>
+<span class="k">float</span> se   = sqrt(s0*s0 + sp*sp);
+<span class="k">float</span> core = <span class="n">1.55</span> * (s0/se) * exp(-<span class="n">0.5</span>*(r*r)/(se*se));</code></pre>
+<figure>
+  <canvas id="fig-line" aria-label="A gaussian line profile, raw and convolved with a pixel"></canvas>
+  <div class="ctl">
+    <label>physical σ <input id="line-sig" type="range" min="0.05" max="1.5" step="0.01" value="0.5"><output id="line-sig-out"></output></label>
+  </div>
+  <figcaption><b>Figure 8.</b> The core's cross-section. Grey is the physical profile; blue is what the
+    shader draws. Take σ down to a twentieth of a pixel and the blue peak drops so the area stays put &mdash;
+    a razor line that never aliases and never flickers.</figcaption>
+</figure>
+<p>The wings of the beam are deliberately weak. A laser in clean air scatters almost nothing sideways; the
+  soft glow you see around a real beam is lens veiling. So the profile falls to the background within two
+  pixels and carries only the spectral hue outward, and every soft halo comes later from the bloom. The
+  frame is composited in linear HDR (16-bit float), bright-passed, bloomed, given an anamorphic streak,
+  and tonemapped with ACES at the very end &mdash; so an over-driven core saturates to white while its
+  wings keep their colour, which is what makes a fan look volumetric instead of like coloured strokes.</p>
+
+<h2 id="why">10. Why bother</h2>
+<p>Because it changes how the game plays, not just how it looks. A tracer that obeys Fresnel means the angle
+  you approach a crystal at decides whether it is a window or a mirror. Dispersion means a shot through glass
+  spreads into a fan that can graze three pilots for a little each. Mirrored walls mean your own beam can
+  come back for you. None of that is scripted; it falls out of four short physical rules and a stack. And
+  because the same rules run identically on every peer, a fan that clips somebody on your screen clips them
+  on theirs. <a href="/how-it-works">How that turns into a game</a>, and
+  <a href="/multiplayer">how the peers stay in agreement</a>.</p>
+<p><a class="cta" href="/">Fire one yourself</a></p>
+    </div>
+  </article>
+</main>
+<footer class="more"><a href="/how-it-works">How it works</a><a href="/critical-mass">Critical Mass</a><a href="/games-like-critical-mass">Games like it</a><a href="/multiplayer">Multiplayer</a><a href="https://github.com/maxberggren/prisma-duel" rel="noopener">Source</a></footer>
+<script>
+/* Live figures for /spectral-ray-tracing. Everything below is the game's own
+   physics re-stated small enough to read: the same CIE fit, the same Cauchy
+   form anchored at the sodium D line, the same Fresnel split and the same
+   depth-first ray stack. Numbers that are the game's constants are named so. */
+'use strict';
+(() => {
+  const $ = id => document.getElementById(id);
+  const clamp = (x, a, b) => x < a ? a : x > b ? b : x;
+
+  /* ---------------------------------------------------- spectrum -> sRGB */
+  const SPEC_LO = 398, SPEC_HI = 706;                     // the game's band, nm
+  const gauss = (x, a, m, s1, s2) => { const t = (x - m) * (x < m ? 1 / s1 : 1 / s2); return a * Math.exp(-0.5 * t * t); };
+  function cieXYZ(l) {                                    // Wyman/Sloan/Shirley fit of CIE 1931
+    return [gauss(l, 1.056, 599.8, 37.9, 31.0) + gauss(l, 0.362, 442.0, 16.0, 26.7) + gauss(l, -0.065, 501.1, 20.4, 26.2),
+            gauss(l, 0.821, 568.8, 46.9, 40.5) + gauss(l, 0.286, 530.9, 16.3, 31.1),
+            gauss(l, 1.217, 437.0, 11.8, 36.0) + gauss(l, 0.681, 459.0, 26.0, 13.8)];
+  }
+  const xyzToRGB = (X, Y, Z) => [3.2406 * X - 1.5372 * Y - 0.4986 * Z,
+                                 -0.9689 * X + 1.8758 * Y + 0.0415 * Z,
+                                  0.0557 * X - 0.2040 * Y + 1.0570 * Z];
+  function toGamut(r, g, b) { const w = Math.min(r, g, b); if (w < 0) { r -= w; g -= w; b -= w; } return [r, g, b]; }
+  function waveRGBraw(l) { const [X, Y, Z] = cieXYZ(l); const [r, g, b] = toGamut(...xyzToRGB(X, Y, Z)); return [Math.max(0, r), Math.max(0, g), Math.max(0, b)]; }
+  let NORM = [1, 1, 1];
+  { let sr = 0, sg = 0, sb = 0, n = 0;
+    for (let l = SPEC_LO; l <= SPEC_HI; l += 0.5) { const c = waveRGBraw(l); sr += c[0]; sg += c[1]; sb += c[2]; n++; }
+    NORM = [n / sr, n / sg, n / sb]; }
+  const waveRGB = l => { const c = waveRGBraw(l); return [c[0] * NORM[0], c[1] * NORM[1], c[2] * NORM[2]]; };
+  const srgb = v => { v = clamp(v, 0, 1); return v <= 0.0031308 ? 12.92 * v : 1.055 * Math.pow(v, 1 / 2.4) - 0.055; };
+  const css = (c, k = 1) => `rgb(${(srgb(c[0] * k) * 255) | 0},${(srgb(c[1] * k) * 255) | 0},${(srgb(c[2] * k) * 255) | 0})`;
+
+  /* ---------------------------------------------------- optics */
+  /* Cauchy, anchored so `A` is the index at the sodium D line (589.3 nm),
+     which is what the game calls `ior`; `B` is what it calls `disp`. */
+  const iorAt = (A, B, lam) => { const um = lam * 1e-3; return A + B / (um * um) - B / (0.5893 * 0.5893); };
+  function fresnel(n1, n2, cosi) {
+    const eta = n1 / n2, sin2t = eta * eta * (1 - cosi * cosi);
+    if (sin2t > 1) return { R: 1, T: 0, cost: 0, tir: true, eta };
+    const cost = Math.sqrt(1 - sin2t);
+    const Rs = ((n1 * cosi - n2 * cost) / (n1 * cosi + n2 * cost)) ** 2;
+    const Rp = ((n1 * cost - n2 * cosi) / (n1 * cost + n2 * cosi)) ** 2;
+    const R = clamp((Rs + Rp) * 0.5, 0, 1);
+    return { R, T: 1 - R, Rs, Rp, cost, tir: false, eta };
+  }
+  const vdc = i => { let r = 0, f = 0.5; while (i > 0) { r += f * (i & 1); i >>= 1; f *= 0.5; } return r; };
+  const vdc3 = i => { let r = 0, f = 1 / 3; while (i > 0) { r += f * (i % 3); i = (i / 3) | 0; f /= 3; } return r; };
+
+  /* ---------------------------------------------------- canvas plumbing */
+  const figs = [];
+  function fig(id, aspect, draw) {
+    const c = $(id); if (!c) return null;
+    const ctx = c.getContext('2d');
+    const f = { c, ctx, draw, aspect, w: 0, h: 0 };
+    f.render = () => {
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      // a wide-and-short figure squashes to nothing on a phone: cap the aspect there
+      const w = c.clientWidth || 600, h = Math.round(w / (w < 520 ? Math.min(aspect, 1.7) : aspect));
+      if (c.width !== Math.round(w * dpr) || c.height !== Math.round(h * dpr)) { c.width = Math.round(w * dpr); c.height = Math.round(h * dpr); }
+      f.w = w; f.h = h;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#07080d'; ctx.fillRect(0, 0, w, h);
+      draw(ctx, w, h, f);
+    };
+    figs.push(f);
+    return f;
+  }
+  const MONO = '10px ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+  function label(ctx, t, x, y, col = '#8d97ab', align = 'left') { ctx.font = MONO; ctx.fillStyle = col; ctx.textAlign = align; ctx.fillText(t, x, y); }
+  function grid(ctx, x0, y0, x1, y1) { ctx.strokeStyle = 'rgba(255,255,255,.08)'; ctx.lineWidth = 1; ctx.strokeRect(x0 + .5, y0 + .5, x1 - x0, y1 - y0); }
+  function bindRange(id, outId, fmt, onChange) {
+    const el = $(id); if (!el) return () => 0;
+    const out = outId ? $(outId) : null;
+    const upd = () => { if (out) out.textContent = fmt(parseFloat(el.value)); onChange && onChange(); };
+    el.addEventListener('input', upd); upd();
+    return () => parseFloat(el.value);
+  }
+
+  /* ================================================== 1. the spectrum strip */
+  let specLam = 550;
+  const spectrum = fig('fig-spectrum', 3.2, (ctx, w, h) => {
+    const top = 14, stripY = h - 46, stripH = 26, L = 24, R = w - 12;
+    const xOf = l => L + (l - 380) / (720 - 380) * (R - L);
+    // CIE curves above the strip
+    const plotH = stripY - top - 24, base = top + plotH;
+    grid(ctx, L, top, R, base);
+    const cols = ['#ff7a8a', '#8cf5b0', '#8ab8ff'];
+    for (let ch = 0; ch < 3; ch++) {
+      ctx.beginPath();
+      for (let l = 380; l <= 720; l += 1) { const v = cieXYZ(l)[ch]; const x = xOf(l), y = base - clamp(v / 1.8, 0, 1) * plotH; l === 380 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+      ctx.strokeStyle = cols[ch]; ctx.lineWidth = 1.2; ctx.stroke();
+    }
+    label(ctx, 'x̄', R - 40, top + 12, cols[0]); label(ctx, 'ȳ', R - 26, top + 12, cols[1]); label(ctx, 'z̄', R - 12, top + 12, cols[2]);
+    label(ctx, 'CIE 1931 observer (Wyman–Sloan–Shirley fit)', L + 4, top + 12);
+    // the strip: what one wavelength looks like, after normalisation
+    for (let x = L; x < R; x++) {
+      const l = 380 + (x - L) / (R - L) * 340;
+      const inBand = l >= SPEC_LO && l <= SPEC_HI;
+      const c = waveRGB(l);
+      ctx.fillStyle = css(c, inBand ? 0.55 : 0.12);
+      ctx.fillRect(x, stripY, 1, stripH);
+    }
+    grid(ctx, L, stripY, R, stripY + stripH);
+    for (const l of [400, 450, 500, 550, 600, 650, 700]) { label(ctx, l + '', xOf(l), h - 6, '#8d97ab', 'center'); ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(xOf(l), stripY + stripH, 1, 4); }
+    label(ctx, SPEC_LO + '–' + SPEC_HI + ' nm is what the game samples', L + 4, stripY - 4);
+    // marker
+    const mx = xOf(specLam), c = waveRGB(specLam);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(mx + .5, top); ctx.lineTo(mx + .5, stripY + stripH); ctx.stroke();
+    ctx.fillStyle = css(c, 0.8); ctx.fillRect(R - 66, stripY - 40, 54, 30); ctx.strokeStyle = 'rgba(255,255,255,.4)'; ctx.strokeRect(R - 66 + .5, stripY - 40 + .5, 54, 30);
+    const [X, Y, Z] = cieXYZ(specLam);
+    const s = $('spec-out'); if (s) s.textContent = `${specLam} nm  ·  XYZ ${X.toFixed(2)} ${Y.toFixed(2)} ${Z.toFixed(2)}  ·  linear RGB ${c.map(v => v.toFixed(2)).join(' ')}`;
+  });
+  bindRange('spec-lam', null, v => v, () => { specLam = parseFloat($('spec-lam').value); spectrum && spectrum.render(); });
+
+  /* ================================================== 2. Snell + Fresnel at one face */
+  let snellDeg = 40, snellN = 1.39, snellLeaving = false;
+  const snell = fig('fig-snell', 2.4, (ctx, w, h) => {
+    const cx = w * 0.5, cy = h * 0.5, len = Math.min(w, h) * 0.42;
+    // glass below the interface
+    ctx.fillStyle = 'rgba(127,216,255,.06)'; ctx.fillRect(0, cy, w, h - cy);
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(0, cy + .5); ctx.lineTo(w, cy + .5); ctx.stroke();
+    ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.beginPath(); ctx.moveTo(cx + .5, cy - len); ctx.lineTo(cx + .5, cy + len); ctx.stroke(); ctx.setLineDash([]);
+    label(ctx, snellLeaving ? 'glass  n = ' + snellN.toFixed(2) : 'air  n = 1.00', 10, cy - 8);
+    label(ctx, snellLeaving ? 'air  n = 1.00' : 'glass  n = ' + snellN.toFixed(2), 10, cy + 14);
+    const th = snellDeg * Math.PI / 180;
+    const n1 = snellLeaving ? snellN : 1, n2 = snellLeaving ? 1 : snellN;
+    const F = fresnel(n1, n2, Math.cos(th));
+    // incoming (from upper-left, towards the point), reflected, refracted
+    const ray = (dx, dy, alpha, wdt, colr) => { ctx.strokeStyle = colr || `rgba(255,255,255,${alpha})`; ctx.lineWidth = wdt; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + dx * len, cy + dy * len); ctx.stroke(); };
+    ray(-Math.sin(th), -Math.cos(th), 0.95, 2.2);
+    ray(Math.sin(th), -Math.cos(th), 0.15 + F.R * 0.85, 0.8 + F.R * 1.6);
+    if (!F.tir) { const st = F.eta * Math.sin(th); ray(st, F.cost, 0.15 + F.T * 0.85, 0.8 + F.T * 1.6, `rgba(127,216,255,${0.2 + F.T * 0.8})`); }
+    // arcs and labels
+    ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(cx, cy, 34, -Math.PI / 2 - th, -Math.PI / 2); ctx.stroke();
+    label(ctx, 'θi ' + snellDeg.toFixed(0) + '°', cx - 44 - Math.sin(th) * 20, cy - 40, '#e9edf5', 'right');
+    if (!F.tir) {
+      const tt = Math.asin(F.eta * Math.sin(th));
+      ctx.beginPath(); ctx.arc(cx, cy, 34, Math.PI / 2 - tt, Math.PI / 2); ctx.stroke();
+      label(ctx, 'θt ' + (tt * 180 / Math.PI).toFixed(1) + '°', cx + 44 + Math.sin(tt) * 20, cy + 46, '#7fd8ff');
+    } else {
+      label(ctx, 'total internal reflection', cx + 12, cy + 24, '#ffcf5c');
+    }
+    const crit = snellLeaving ? Math.asin(1 / snellN) * 180 / Math.PI : null;
+    label(ctx, `reflected ${(F.R * 100).toFixed(1)}%   transmitted ${(F.T * 100).toFixed(1)}%` + (crit ? `   critical angle ${crit.toFixed(1)}°` : ''), 10, h - 8, '#cfd8e8');
+  });
+  bindRange('snell-deg', 'snell-deg-out', v => v.toFixed(0) + '°', () => { snellDeg = parseFloat($('snell-deg').value); snell && snell.render(); });
+  bindRange('snell-n', 'snell-n-out', v => v.toFixed(2), () => { snellN = parseFloat($('snell-n').value); snell && snell.render(); });
+  const lv = $('snell-leaving'); if (lv) lv.addEventListener('change', () => { snellLeaving = lv.checked; snell && snell.render(); });
+
+  /* ================================================== 3. Fresnel curves */
+  let fresN = 1.39;
+  const fres = fig('fig-fresnel', 2.6, (ctx, w, h) => {
+    const L = 34, R = w - 12, T = 14, B = h - 22;
+    grid(ctx, L, T, R, B);
+    const xOf = d => L + d / 90 * (R - L), yOf = r => B - r * (B - T);
+    for (const r of [0.25, 0.5, 0.75]) { ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(L, yOf(r), R - L, 1); label(ctx, (r * 100) + '%', L - 4, yOf(r) + 3, '#8d97ab', 'right'); }
+    for (const d of [0, 30, 60, 90]) label(ctx, d + '°', xOf(d), h - 7, '#8d97ab', 'center');
+    const curve = (fn, col, dash) => { ctx.setLineDash(dash || []); ctx.strokeStyle = col; ctx.lineWidth = 1.4; ctx.beginPath();
+      for (let d = 0; d <= 90; d += 0.5) { const v = fn(d * Math.PI / 180); const x = xOf(d), y = yOf(clamp(v, 0, 1)); d === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke(); ctx.setLineDash([]); };
+    curve(t => fresnel(1, fresN, Math.cos(t)).Rs, 'rgba(255,255,255,.35)');
+    curve(t => fresnel(1, fresN, Math.cos(t)).Rp, 'rgba(255,255,255,.35)', [2, 3]);
+    curve(t => fresnel(1, fresN, Math.cos(t)).R, '#7fd8ff');
+    curve(t => fresnel(fresN, 1, Math.cos(t)).R, '#ffcf5c');
+    const crit = Math.asin(1 / fresN) * 180 / Math.PI;
+    ctx.fillStyle = 'rgba(255,207,92,.35)'; ctx.fillRect(xOf(crit), T, 1, B - T);
+    label(ctx, 'critical ' + crit.toFixed(1) + '°', xOf(crit) - 5, B - 30, '#ffcf5c', 'right');
+    label(ctx, 'entering glass (Rs, Rp thin; average blue)', L + 6, T + 12, '#7fd8ff');
+    label(ctx, 'leaving glass', L + 6, T + 24, '#ffcf5c');
+    label(ctx, 'Brewster ' + (Math.atan(fresN) * 180 / Math.PI).toFixed(0) + '°: Rp = 0', xOf(Math.atan(fresN) * 180 / Math.PI) + 4, B - 6, '#8d97ab');
+  });
+  bindRange('fres-n', 'fres-n-out', v => v.toFixed(2), () => { fresN = parseFloat($('fres-n').value); fres && fres.render(); });
+
+  /* ================================================== 4. Cauchy dispersion */
+  let cA = 1.39, cB = 0.060;
+  const cauchy = fig('fig-cauchy', 2.6, (ctx, w, h) => {
+    const L = 40, R = w - 12, T = 14, B = h - 22;
+    grid(ctx, L, T, R, B);
+    const nLo = 1.30, nHi = 1.65;
+    const xOf = l => L + (l - SPEC_LO) / (SPEC_HI - SPEC_LO) * (R - L), yOf = n => B - (n - nLo) / (nHi - nLo) * (B - T);
+    for (const n of [1.35, 1.40, 1.45, 1.50, 1.55, 1.60]) { ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(L, yOf(n), R - L, 1); label(ctx, n.toFixed(2), L - 4, yOf(n) + 3, '#8d97ab', 'right'); }
+    for (const l of [400, 500, 589, 700]) label(ctx, l + '', xOf(l), h - 7, '#8d97ab', 'center');
+    ctx.save(); ctx.beginPath(); ctx.rect(L, T, R - L, B - T); ctx.clip();
+    // the game's range, as a band
+    ctx.fillStyle = 'rgba(127,216,255,.05)';
+    ctx.beginPath();
+    for (let l = SPEC_LO; l <= SPEC_HI; l += 2) { const y = yOf(iorAt(1.34, 0.045, l)); l === SPEC_LO ? ctx.moveTo(xOf(l), y) : ctx.lineTo(xOf(l), y); }
+    for (let l = SPEC_HI; l >= SPEC_LO; l -= 2) ctx.lineTo(xOf(l), yOf(iorAt(1.44, 0.075, l)));
+    ctx.closePath(); ctx.fill();
+    label(ctx, 'shaded: every crystal the arena can generate', L + 6, T + 12);
+    // the curve, coloured by wavelength
+    for (let l = SPEC_LO; l < SPEC_HI; l += 2) {
+      ctx.strokeStyle = css(waveRGB(l + 1), 0.9); ctx.lineWidth = 2; ctx.beginPath();
+      ctx.moveTo(xOf(l), yOf(iorAt(cA, cB, l))); ctx.lineTo(xOf(l + 2), yOf(iorAt(cA, cB, l + 2))); ctx.stroke();
+    }
+    ctx.restore();
+    ctx.fillStyle = 'rgba(255,255,255,.25)'; ctx.fillRect(xOf(589.3), T, 1, B - T);
+    label(ctx, 'sodium D  n = A', xOf(589.3) + 4, B - 6, '#cfd8e8');
+    const o = $('cauchy-out'); if (o) o.textContent = `n(400) = ${iorAt(cA, cB, 400).toFixed(4)}   n(589) = ${cA.toFixed(4)}   n(700) = ${iorAt(cA, cB, 700).toFixed(4)}   spread ${(iorAt(cA, cB, 400) - iorAt(cA, cB, 700)).toFixed(4)}`;
+  });
+  bindRange('cauchy-a', 'cauchy-a-out', v => v.toFixed(2), () => { cA = parseFloat($('cauchy-a').value); cauchy && cauchy.render(); });
+  bindRange('cauchy-b', 'cauchy-b-out', v => v.toFixed(3), () => { cB = parseFloat($('cauchy-b').value); cauchy && cauchy.render(); });
+
+  /* ================================================== 5. Beer–Lambert */
+  const beer = fig('fig-beer', 4.2, (ctx, w, h) => {
+    const L = 34, R = w - 12, T = 12, B = h - 20;
+    grid(ctx, L, T, R, B);
+    const xOf = t => L + t / 3 * (R - L), yOf = p => B - p * (B - T);
+    for (const p of [0.5, 1]) { ctx.fillStyle = 'rgba(255,255,255,.08)'; ctx.fillRect(L, yOf(p), R - L, 1); label(ctx, (p * 100) + '%', L - 4, yOf(p) + 3, '#8d97ab', 'right'); }
+    for (const t of [0, 1, 2, 3]) label(ctx, t + (t === 3 ? ' world units' : ''), xOf(t), h - 6, '#8d97ab', 'center');
+    ctx.strokeStyle = '#7fd8ff'; ctx.lineWidth = 1.5; ctx.beginPath();
+    for (let t = 0; t <= 3; t += 0.02) { const x = xOf(t), y = yOf(Math.exp(-0.55 * t)); t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); }
+    ctx.stroke();
+    label(ctx, 'power × e^(−0.55·d) inside glass; a crystal is 0.2–0.5 units across', L + 6, T + 12);
+  });
+
+  /* ================================================== 6. the beam has a waist */
+  let waistOff = 1.08;
+  const waist = fig('fig-waist', 3.4, (ctx, w, h) => {
+    const cx = w * 0.62, cy = h * 0.5, S = h * 0.36;      // pixels per hull radius
+    const HULL_R = 1, WAIST = 0.0101 / 0.046;             // BEAM_WAIST / HULL_R
+    const off = waistOff * (1 + WAIST);
+    // hull
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, cy + off * S, HULL_R * S, 0, Math.PI * 2); ctx.stroke();
+    label(ctx, 'hull, radius 0.046', cx + S + 6, cy + off * S + 3);
+    // 16 rays across the waist on the base-3 van der Corput sequence
+    let hit = 0;
+    for (let k = 0; k < 16; k++) {
+      const o = (vdc3(k + 1) * 2 - 1) * WAIST;
+      const y = cy + o * S;
+      const dy = (y - (cy + off * S)) / S;
+      const hits = Math.abs(dy) <= HULL_R;
+      if (hits) hit++;
+      const xEnd = hits ? cx - Math.sqrt(Math.max(0, HULL_R * HULL_R - dy * dy)) * S : w;
+      ctx.strokeStyle = hits ? 'rgba(255,255,255,.9)' : 'rgba(255,255,255,.22)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(10, y); ctx.lineTo(xEnd, y); ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(127,216,255,.5)'; ctx.setLineDash([2, 3]); ctx.beginPath(); ctx.moveTo(30, cy - WAIST * S); ctx.lineTo(30, cy + WAIST * S); ctx.stroke(); ctx.setLineDash([]);
+    label(ctx, 'waist 0.0101, 16 rays', 36, cy - WAIST * S - 6, '#7fd8ff');
+    const o = $('waist-out'); if (o) o.textContent = `${hit} of 16 rays land → ${(hit / 16 * 100).toFixed(0)}% of full damage`;
+  });
+  bindRange('waist-off', 'waist-off-out', v => v.toFixed(2), () => { waistOff = parseFloat($('waist-off').value); waist && waist.render(); });
+
+  /* ================================================== 7. the line, drawn */
+  let lineSig = 0.5;
+  const line = fig('fig-line', 3.6, (ctx, w, h) => {
+    const L = 34, R = w - 12, T = 12, B = h - 20;
+    grid(ctx, L, T, R, B);
+    const xOf = r => L + (r + 3) / 6 * (R - L);
+    // s0 = physical sigma in pixels (slider), sp = 0.42 px pixel footprint
+    const s0 = lineSig, sp = 0.42, se = Math.sqrt(s0 * s0 + sp * sp);
+    const raw = r => Math.exp(-0.5 * r * r / (s0 * s0));                  // point-sampled
+    const conv = r => (s0 / se) * Math.exp(-0.5 * r * r / (se * se));     // what the shader draws
+    const yOf = v => B - clamp(v, 0, 1.05) / 1.05 * (B - T);
+    ctx.strokeStyle = 'rgba(255,255,255,.3)'; ctx.lineWidth = 1; ctx.beginPath();
+    for (let r = -3; r <= 3; r += 0.02) { const x = xOf(r), y = yOf(raw(r)); r === -3 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke();
+    ctx.strokeStyle = '#7fd8ff'; ctx.lineWidth = 1.6; ctx.beginPath();
+    for (let r = -3; r <= 3; r += 0.02) { const x = xOf(r), y = yOf(conv(r)); r === -3 ? ctx.moveTo(x, y) : ctx.lineTo(x, y); } ctx.stroke();
+    // pixel columns, to show what a sample sees
+    for (let px = -3; px <= 3; px++) { ctx.fillStyle = 'rgba(255,255,255,.06)'; ctx.fillRect(xOf(px - 0.5), T, 1, B - T); }
+    for (const r of [-2, -1, 0, 1, 2]) label(ctx, r + ' px', xOf(r), h - 6, '#8d97ab', 'center');
+    label(ctx, 'grey: physical core, σ = ' + s0.toFixed(2) + ' px  ·  blue: convolved with the pixel, peak × σ/σ′ (same area)', L + 6, T + 12);
+  });
+  bindRange('line-sig', 'line-sig-out', v => v.toFixed(2) + ' px', () => { lineSig = parseFloat($('line-sig').value); line && line.render(); });
+
+  /* ================================================== 8. the tracer */
+  const TR = { rays: 96, ior: 1.39, disp: 0.060, jitter: true, aim: null, walls: 0.86, mirror: true, seed: 7 };
+  function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function makePrism(seed, w, h) {
+    const r = rng(seed * 7919 + 13);
+    const faces = 5 + Math.floor(r() * 4), base = r() * Math.PI * 2, rad = Math.min(w, h) * 0.24;
+    const verts = [];
+    for (let k = 0; k < faces; k++) { const a = base + (k + (r() - 0.5) * 0.45) * (Math.PI * 2 / faces); const rr = rad * (0.60 + r() * 0.40); verts.push([Math.cos(a) * rr, Math.sin(a) * rr]); }
+    return { x: w * 0.55, y: h * 0.5, verts };
+  }
+  function inside(P, x, y) {
+    let c = false; const v = P.verts;
+    for (let i = 0, j = v.length - 1; i < v.length; j = i++) {
+      const xi = v[i][0] + P.x, yi = v[i][1] + P.y, xj = v[j][0] + P.x, yj = v[j][1] + P.y;
+      if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) c = !c;
+    }
+    return c;
+  }
+  /* nearest hit along a ray: the four mirrored walls, or one face of the prism */
+  function sceneHit(P, w, h, ox, oy, dx, dy) {
+    let best = null;
+    const wall = (t, nx, ny) => { if (t > 1e-6 && (!best || t < best.t)) best = { t, nx, ny, kind: 2 }; };
+    if (dx > 0) wall((w - ox) / dx, -1, 0); if (dx < 0) wall(-ox / dx, 1, 0);
+    if (dy > 0) wall((h - oy) / dy, 0, -1); if (dy < 0) wall(-oy / dy, 0, 1);
+    const v = P.verts;
+    for (let i = 0, j = v.length - 1; i < v.length; j = i++) {
+      const ax = v[j][0] + P.x, ay = v[j][1] + P.y, bx = v[i][0] + P.x, by = v[i][1] + P.y;
+      const ex = bx - ax, ey = by - ay, den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = ((ax - ox) * ey - (ay - oy) * ex) / den, u = ((ax - ox) * dy - (ay - oy) * dx) / den;
+      if (t > 1e-6 && u >= 0 && u <= 1 && (!best || t < best.t)) { const l = Math.hypot(ex, ey); best = { t, nx: ey / l, ny: -ex / l, kind: 0 }; }
+    }
+    return best;
+  }
+  const tracer = fig('fig-tracer', 1.9, (ctx, w, h, f) => {
+    const P = f.prism = (f.prism && f.prism.seed === TR.seed && f.prism.w === w) ? f.prism : Object.assign(makePrism(TR.seed, w, h), { seed: TR.seed, w });
+    // the crystal
+    ctx.beginPath(); P.verts.forEach((v, i) => i ? ctx.lineTo(v[0] + P.x, v[1] + P.y) : ctx.moveTo(v[0] + P.x, v[1] + P.y)); ctx.closePath();
+    ctx.fillStyle = 'rgba(90,120,200,.10)'; ctx.fill(); ctx.strokeStyle = 'rgba(180,200,255,.35)'; ctx.lineWidth = 1; ctx.stroke();
+    // the walls
+    ctx.strokeStyle = 'rgba(255,255,255,.22)'; ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+    // the muzzle
+    const mx = w * 0.10, my = h * 0.5;
+    /* First frame: aim a little above the crystal's centre, so the opening
+       shot enters a face off-axis and the fan is there before anybody drags. */
+    if (TR.aim === null) TR.aim = Math.atan2(P.y - my, P.x - mx) + 0.10;
+    const dx = Math.cos(TR.aim), dy = Math.sin(TR.aim);
+    ctx.globalCompositeOperation = 'lighter';
+    const N = TR.rays, pw = 1 / N, gain = 7 / N;
+    let segs = 0;
+    for (let k = 0; k < N; k++) {
+      const u = N === 1 ? 0.5 : (k + (TR.jitter ? (vdc(k + 1) - 0.5) * 0.9 : 0)) / (N - 1);
+      const lam = SPEC_LO + clamp(u, 0, 1) * (SPEC_HI - SPEC_LO);
+      const col = waveRGB(lam);
+      const stack = [[mx, my, dx, dy, pw, 0, inside(P, mx, my)]];
+      while (stack.length) {
+        const [x, y, ux, uy, p, depth, inGlass] = stack.pop();
+        if (p < pw * 0.006 || depth > 9 || segs > 20000) continue;
+        const hit = sceneHit(P, w, h, x, y, ux, uy); if (!hit) continue;
+        const hx = x + ux * hit.t, hy = y + uy * hit.t;
+        let pp = p;
+        if (inGlass) pp *= Math.exp(-hit.t / (Math.min(w, h) * 0.3) * 0.55);      // Beer–Lambert, scaled to the figure
+        if (hit.t < 0.4) { segs++; } else {
+        ctx.strokeStyle = css(col, (p + pp) * 0.5 / pw * gain); ctx.lineWidth = 0.9;
+        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(hx, hy); ctx.stroke(); segs++; }
+        if (hit.kind === 2) {                                                        // mirror (or, walls off, a black wall)
+          if (!TR.mirror) continue;
+          const d = ux * hit.nx + uy * hit.ny, rx = ux - 2 * d * hit.nx, ry = uy - 2 * d * hit.ny;
+          if (pp * TR.walls > pw * 0.010) stack.push([hx + rx * 1e-3, hy + ry * 1e-3, rx, ry, pp * TR.walls, depth + 1, inGlass]);
+          continue;
+        }
+        const nG = iorAt(TR.ior, TR.disp, lam);                                       // the crystal
+        let nx = hit.nx, ny = hit.ny, cosi = -(ux * nx + uy * ny);
+        if (cosi < 0) { nx = -nx; ny = -ny; cosi = -cosi; }
+        cosi = clamp(cosi, 0, 1);
+        const n1 = inGlass ? nG : 1, n2 = inGlass ? 1 : nG;
+        const F = fresnel(n1, n2, cosi);
+        const rx = ux + 2 * cosi * nx, ry = uy + 2 * cosi * ny;
+        if (pp * F.R > pw * 0.010) stack.push([hx + rx * 1e-3, hy + ry * 1e-3, rx, ry, pp * F.R, depth + 1, inGlass]);
+        if (!F.tir && pp * F.T > pw * 0.010) {
+          const tx = F.eta * ux + (F.eta * cosi - F.cost) * nx, ty = F.eta * uy + (F.eta * cosi - F.cost) * ny;
+          stack.push([hx + tx * 1e-3, hy + ty * 1e-3, tx, ty, pp * F.T, depth + 1, !inGlass]);
+        }
+      }
+    }
+    ctx.globalCompositeOperation = 'source-over';
+    // the ship
+    ctx.save(); ctx.translate(mx, my); ctx.rotate(TR.aim);
+    ctx.fillStyle = '#e9edf5'; ctx.beginPath(); ctx.moveTo(8, 0); ctx.lineTo(-7, 6); ctx.lineTo(-4, 0); ctx.lineTo(-7, -6); ctx.closePath(); ctx.fill();
+    ctx.restore();
+    const o = $('tracer-out'); if (o) o.textContent = `${N} rays · ${segs} segments · aim ${(TR.aim * 180 / Math.PI).toFixed(1)}° — drag on the picture to aim`;
+  });
+  if (tracer) {
+    const c = tracer.c; let aiming = false;
+    const aimTo = ev => { const r = c.getBoundingClientRect(); const x = ev.clientX - r.left, y = ev.clientY - r.top; TR.aim = Math.atan2(y - tracer.h * 0.5, x - tracer.w * 0.10); tracer.render(); };
+    c.addEventListener('pointerdown', ev => { aiming = true; c.setPointerCapture(ev.pointerId); aimTo(ev); ev.preventDefault(); });
+    c.addEventListener('pointermove', ev => { if (aiming) aimTo(ev); });
+    c.addEventListener('pointerup', () => { aiming = false; });
+    c.addEventListener('pointercancel', () => { aiming = false; });
+    bindRange('tr-rays', 'tr-rays-out', v => v.toFixed(0), () => { TR.rays = parseInt($('tr-rays').value, 10); tracer.render(); });
+    bindRange('tr-ior', 'tr-ior-out', v => v.toFixed(2), () => { TR.ior = parseFloat($('tr-ior').value); tracer.render(); });
+    bindRange('tr-disp', 'tr-disp-out', v => v.toFixed(3), () => { TR.disp = parseFloat($('tr-disp').value); tracer.render(); });
+    const j = $('tr-jitter'); if (j) j.addEventListener('change', () => { TR.jitter = j.checked; tracer.render(); });
+    const mw = $('tr-mirror'); if (mw) mw.addEventListener('change', () => { TR.mirror = mw.checked; tracer.render(); });
+    const nb = $('tr-new'); if (nb) nb.addEventListener('click', () => { TR.seed = (TR.seed * 31 + 7) % 10007; tracer.render(); });
+  }
+
+  /* ---------------------------------------------------- go */
+  const all = () => figs.forEach(f => f.render());
+  if ('ResizeObserver' in window) { const ro = new ResizeObserver(() => all()); figs.forEach(f => ro.observe(f.c)); }
+  else addEventListener('resize', all);
+  all();
+})();
+</script>
+</body>
+</html>

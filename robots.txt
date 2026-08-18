@@ -1,4 +1,4 @@
-# Prisma Duel. One page, and it is meant to be found.
+# Prisma Duel. The game and its pages are meant to be found.
 User-agent: *
 Allow: /
 
@@ -6,7 +6,9 @@ Allow: /
 Disallow: /rooms.json
 Disallow: /healthz
 Disallow: /__net/
+# The pages' unassembled sources; the assembled pages answer at clean URLs.
+Disallow: /pages/src/
 
 # server.js rewrites this origin to whatever host actually served the file,
 # so a preview deployment does not advertise production's sitemap.
-Sitemap: https://prisma.oooo.ws/sitemap.xml
+Sitemap: https://prismaduel.com/sitemap.xml

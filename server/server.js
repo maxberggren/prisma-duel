@@ -142,6 +142,12 @@ function pickStaticRoot() {
   return __dirname;
 }
 const STATIC_ROOT = pickStaticRoot();
+/* The pages that answer to a clean URL: whatever pages/*.html holds at start.
+   Read once -- the set changes only with a deploy. */
+const PAGES = new Set((() => {
+  try { return fs.readdirSync(path.join(STATIC_ROOT, 'pages')).filter(f => f.endsWith('.html')).map(f => f.slice(0, -5)); }
+  catch (_) { return []; }
+})());
 const MODULE_DIR = require('path').join(__dirname, '..', 'src');
 const SELF_DIR = __dirname;
 
@@ -196,7 +202,7 @@ function serveFile(res, abs, req) {
 
    When the request already comes in on SITE_ORIGIN the substitution finds
    nothing and the bytes go out unchanged. */
-const SITE_ORIGIN = (process.env.SITE_ORIGIN || 'https://prisma.oooo.ws').replace(/\/+$/, '');
+const SITE_ORIGIN = (process.env.SITE_ORIGIN || 'https://prismaduel.com').replace(/\/+$/, '');
 const ORIGIN_FILES = new Set(['.html', '.webmanifest', '.xml', '.txt']);
 
 function requestOrigin(req) {
@@ -246,6 +252,19 @@ const httpServer = http.createServer((req, res) => {
     const abs = safeJoin(/^\/net\.js$/.test(rel.split('?')[0]) ? MODULE_DIR : SELF_DIR, rel);
     if (!abs) { res.writeHead(400); return res.end('bad path'); }
     return serveFile(res, abs, req);
+  }
+  /* The site's documents live at clean URLs -- /how-it-works, not
+     /pages/how-it-works.html -- and each has exactly one address: the .html
+     and trailing-slash spellings redirect to it, so a search engine is not
+     handed three copies of one page to choose between. */
+  const clean = url.split('?')[0].split('#')[0];
+  const pm = /^\/(?:(pages)\/)?([a-z0-9-]+?)(\.html|\/)?$/.exec(clean);
+  if (pm && PAGES.has(pm[2]) && pm[2] !== 'index') {
+    if (pm[1] || pm[3]) {
+      res.writeHead(301, { location: '/' + pm[2], 'cache-control': 'no-store' });
+      return res.end();
+    }
+    return serveFile(res, path.join(STATIC_ROOT, 'pages', pm[2] + '.html'), req);
   }
   const abs = safeJoin(STATIC_ROOT, url);
   if (!abs) { res.writeHead(400, { 'content-type': 'text/plain' }); return res.end('bad path'); }

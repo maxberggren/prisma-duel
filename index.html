@@ -6,7 +6,7 @@
 <title>Prisma Duel — Turn-Based Spectral Laser Dogfight</title>
 
 <!-- ===========================================================  metadata ===
-     Every absolute URL below is written against https://prisma.oooo.ws, and
+     Every absolute URL below is written against https://prismaduel.com, and
      server.js swaps that origin for whichever host actually served the page
      (see rewriteOrigin there). So a preview link is correct on the production
      domain, on a Coolify preview deployment and on a laptop on the LAN, with
@@ -16,7 +16,7 @@
      straight off the filesystem (README: practice needs no server), and a
      root-relative href is a dead link there. -->
 <meta name="description" content="Turn-based laser dogfights in a mirrored arena of dichroic crystals — a free browser homage to Sean O'Connor's Critical Mass (1996). Drag a course, commit, watch the turn resolve.">
-<link rel="canonical" href="https://prisma.oooo.ws/">
+<link rel="canonical" href="https://prismaduel.com/">
 <meta name="theme-color" content="#05060a">
 <meta name="color-scheme" content="dark">
 <meta name="robots" content="index,follow,max-image-preview:large">
@@ -35,12 +35,12 @@
 <meta property="og:site_name" content="Prisma Duel">
 <meta property="og:title" content="Prisma Duel — Turn-Based Spectral Laser Dogfight">
 <meta property="og:description" content="The weapon is a real spectral ray tracer: fire through a dichroic crystal and your beam disperses into a rainbow that can kill people you never had a line of sight to. Free in the browser, up to four pilots — in the spirit of Sean O'Connor's Critical Mass.">
-<meta property="og:url" content="https://prisma.oooo.ws/">
+<meta property="og:url" content="https://prismaduel.com/">
 <meta property="og:locale" content="en">
 <!-- Absolute, and PNG: X and Slack both refuse to resolve a relative og:image,
      and the card is dropped silently rather than reported. -->
-<meta property="og:image" content="https://prisma.oooo.ws/assets/og.png">
-<meta property="og:image:secure_url" content="https://prisma.oooo.ws/assets/og.png">
+<meta property="og:image" content="https://prismaduel.com/assets/og.png">
+<meta property="og:image:secure_url" content="https://prismaduel.com/assets/og.png">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -49,7 +49,7 @@
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Prisma Duel — Turn-Based Spectral Laser Dogfight">
 <meta name="twitter:description" content="Fire through a crystal, disperse into a rainbow, kill what you cannot see. Turn-based laser duels, free in the browser.">
-<meta name="twitter:image" content="https://prisma.oooo.ws/assets/og.png">
+<meta name="twitter:image" content="https://prismaduel.com/assets/og.png">
 <meta name="twitter:image:alt" content="A fighter fires a white laser into a dichroic crystal; the beam leaves the far side as a fan of rainbow rays across the arena.">
 
 <script type="application/ld+json">
@@ -57,10 +57,10 @@
   "@context": "https://schema.org",
   "@type": "VideoGame",
   "name": "Prisma Duel",
-  "url": "https://prisma.oooo.ws/",
+  "url": "https://prismaduel.com/",
   "description": "A top-down, turn-based laser dogfight whose weapon is a real spectral ray tracer and whose terrain is dichroic crystals. Fire through one and the beam refracts, disperses into a rainbow fan, and can strike people who were never in your line of sight.",
-  "image": "https://prisma.oooo.ws/assets/og.png",
-  "screenshot": "https://prisma.oooo.ws/assets/screenshot-wide.png",
+  "image": "https://prismaduel.com/assets/og.png",
+  "screenshot": "https://prismaduel.com/assets/screenshot-wide.png",
   "applicationCategory": "GameApplication",
   "genre": ["Strategy", "Action", "Shooter"],
   "gamePlatform": "Web browser",
@@ -519,6 +519,24 @@
 </head>
 <body>
 <canvas id="gl" role="img" aria-label="Tactical view of the arena">Turn-based laser combat. Use the Orders panel to set your course, throttle and laser.</canvas>
+<!-- For a reader that runs no scripts -- a crawler, a text browser, a
+     locked-down profile. The game cannot start for them, but the site can
+     still say what it is and where the words are. -->
+<noscript>
+  <div style="max-width:640px;margin:48px auto;padding:0 20px;font:15px/1.6 system-ui,sans-serif;color:#c1cade">
+    <h1 style="font:600 20px/1.3 system-ui,sans-serif;letter-spacing:.2em;text-transform:uppercase;color:#e9edf5">Prisma Duel</h1>
+    <p>A free, top-down, turn-based space combat game for the browser, and an homage to Sean O'Connor's
+      <a href="/critical-mass" style="color:#7fd8ff">Critical Mass</a>. Drag a course, commit, and watch every
+      pilot's orders resolve at once. The laser is a real spectral ray tracer: fire it through a crystal and it
+      refracts into a rainbow that can hit people you had no line of sight to. Up to four players, no download.</p>
+    <p>The game needs JavaScript and WebGL2 to run. Meanwhile:
+      <a href="/how-it-works" style="color:#7fd8ff">how it works</a> &middot;
+      <a href="/critical-mass" style="color:#7fd8ff">the story of Critical Mass</a> &middot;
+      <a href="/games-like-critical-mass" style="color:#7fd8ff">games like Critical Mass</a> &middot;
+      <a href="/spectral-ray-tracing" style="color:#7fd8ff">how the laser works</a> &middot;
+      <a href="/multiplayer" style="color:#7fd8ff">multiplayer</a></p>
+  </div>
+</noscript>
 
 <!--#HUDHTML-BEGIN-->
 <div class="ui" id="ui">
@@ -713,7 +731,8 @@
         2004. It is still sold and still maintained today, for Windows, iPhone, iPad, Android and
         Kindle.</p>
       <p><a href="https://www.windowsgames.co.uk/critical.html" target="_blank" rel="noopener noreferrer">Critical
-        Mass at Sean O'Connor's Windows Games &rarr;</a></p>
+        Mass at Sean O'Connor's Windows Games &rarr;</a><br>
+        <a href="/critical-mass" target="_blank">The full story of Critical Mass, and where to get it &rarr;</a></p>
 
       <h3 id="homage">What is kept, and what is not</h3>
       <p>Kept: the overhead view, the secret orders, the simultaneous resolution you sit and watch,
@@ -727,6 +746,14 @@
       <p>If you found this while searching for Critical Mass: go and get the real thing. It is
         still there, it is still maintained, and it is still better at being itself. This is a love
         letter, not a replacement.</p>
+
+      <h3 id="read-more">Read more</h3>
+      <p><a href="/spectral-ray-tracing" target="_blank">How the laser works &rarr;</a> the spectral ray
+        tracer, with live examples of Snell, Fresnel and dispersion.<br>
+        <a href="/multiplayer" target="_blank">How multiplayer works &rarr;</a> room codes, peer-to-peer, and
+        why the match survives the server.<br>
+        <a href="/games-like-critical-mass" target="_blank">Games like Critical Mass &rarr;</a> the rest of the
+        genre, old and new.</p>
 
       <p class="foot">Prisma Duel is an independent tribute. It is not affiliated with, endorsed by
         or connected to Sean O'Connor or Windows Games Ltd.</p>

@@ -1,0 +1,77 @@
+<!--meta {
+  "title": "How Prisma Duel works",
+  "crumb": "How it works",
+  "sub": "The rules of a turn-based laser dogfight, in five minutes",
+  "description": "How to play Prisma Duel: simultaneous turns, one drag control for course and speed, a nose-mounted laser that does damage per millisecond of dwell, refracting crystals, mirrored walls and an arena that closes in. Free, in the browser.",
+  "type": "HowTo",
+  "ld": { "totalTime": "PT5M",
+          "step": [
+            { "@type": "HowToStep", "name": "Set a course", "text": "Drag the handle at the end of your course line. Direction is heading; distance is speed." },
+            { "@type": "HowToStep", "name": "Decide whether to fire", "text": "Arm the laser if it is charged. Firing spends the whole capacitor and stops your shields regenerating that turn." },
+            { "@type": "HowToStep", "name": "Commit", "text": "Press Enter or COMMIT. When every pilot has committed, or the clock runs out, all orders resolve together over four seconds." } ] }
+}-->
+<p class="lead">Prisma Duel is a free, top-down, <b>turn-based space combat game</b> that runs in a browser tab.
+  You fly one fighter in a mirrored arena strewn with dichroic crystals. Nothing happens in real time:
+  each turn you set a course, decide whether to fire, and commit &mdash; then every pilot's orders resolve
+  together over about four seconds, and you watch what your guesses actually did.</p>
+<p><a class="cta" href="/">Play now &mdash; no download, no account</a></p>
+
+<h2 id="the-turn">The turn</h2>
+<p>Everybody plans at the same time, against a clock. When the last pilot commits &mdash; or the clock
+  runs out, in which case your fighter simply holds its last course &mdash; the turn executes for everyone
+  at once. There is no initiative order and no waiting your turn. This is the <em>we-go</em> or
+  <em>simultaneous turn</em> structure that games like Frozen Synapse and Combat Mission use, and that
+  <a href="/critical-mass">Critical Mass</a> used before them: the tension is that you are aiming at where
+  someone will be in four seconds, not at where they are now.</p>
+
+<h2 id="the-control">One control, and it is out on the arena</h2>
+<p>Drag the handle at the end of your course line. The direction you drag is your heading; how far you
+  drag is your speed. The arrow keys do the same job if you prefer them, with <b>Shift</b> for a finer step
+  when you are threading a shot through a crystal.</p>
+<p>Speed is bought from the same power the laser capacitor wants. A long drag is a fast run with nothing
+  left to charge with; a short one is a tight turn that fills the capacitor. The orders panel shows you the
+  split, but nothing in that panel is settable &mdash; the drag is the whole interface. Your course carries
+  over between turns, so holding a curve is what happens if you do nothing.</p>
+
+<h2 id="the-laser">The laser</h2>
+<p>The beam is welded to your nose. There is no turret, no lead indicator and no lock. Damage is charged
+  <b>per millisecond of dwell</b>: a graze costs a few points, and holding somebody in the beam for a whole
+  turn is fatal. Because hitting anything means turning to track it, and turning is exactly what your
+  throttle just made expensive, every shot is an argument with your own speed.</p>
+<p>Firing spends the entire capacitor and suppresses shield regeneration for that turn. Shields absorb
+  before hull, and they only come back on turns you keep the laser cold.</p>
+<p class="aside">The beam is not a line with a hit test on it. It is a real spectral ray tracer &mdash;
+  ninety-odd wavelengths, Snell, Fresnel and dispersion &mdash; and the damage is the light that actually
+  lands. <a href="/spectral-ray-tracing">How the laser works</a> goes through it with live examples.</p>
+
+<h2 id="the-arena">Crystals, mirrors and the closing walls</h2>
+<p>Every crystal is cut differently &mdash; five to eight faces, each vertex at its own radius and angle,
+  generated from the arena seed &mdash; so no two arenas look alike. They are solid cover, and they refract.
+  Fire through one and your beam bends, disperses into a rainbow fan, and can strike pilots who were never
+  in your line of sight. The arena walls are mirrors, so a bank shot is a real tactic, including the bank
+  shot that comes back and hits you. Flying into either is fatal.</p>
+<p>From turn seven the box tightens. Once it is as small as it goes it begins to collapse, hurting everyone
+  still alive by an escalating amount, so two careful pilots cannot circle each other forever &mdash;
+  measured with no shots fired at all, every match still ends by turn 36.</p>
+
+<h2 id="playing">Playing it</h2>
+<p><b>Practice</b> puts you against three bots and needs no server at all. <b>Multiplayer</b> takes up to
+  four pilots: enter a room code, or leave it blank to be matched. Any pair of players that can reach each
+  other plays peer-to-peer, and any pair that cannot falls back to a relay, so a match survives most
+  networks. <a href="/multiplayer">How multiplayer works</a> has the details.</p>
+
+<dl class="keys">
+  <dt>Drag / Arrows</dt><dd>set your course &mdash; Shift for a fine step</dd>
+  <dt>F</dt><dd>arm the laser</dd>
+  <dt>Enter</dt><dd>commit your orders</dd>
+  <dt>0</dt><dd>reset the view</dd>
+  <dt>H</dt><dd>hide the interface</dd>
+  <dt>?</dt><dd>the manual, in the game</dd>
+</dl>
+
+<h2 id="where-it-comes-from">Where it comes from</h2>
+<p>Prisma Duel is an homage to <b>Critical Mass</b>, Sean O'Connor's turn-based squadron game for Windows
+  from 1996. The overhead view, the secret orders, the simultaneous resolution you sit and watch, and above
+  all the control &mdash; a course you drag out in front of the ship, with momentum you have to plan around
+  &mdash; are his. <a href="/critical-mass">The story of Critical Mass</a>, and
+  <a href="/games-like-critical-mass">other games like it</a>, are on their own pages.</p>

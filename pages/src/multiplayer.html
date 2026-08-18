@@ -1,0 +1,69 @@
+<!--meta {
+  "title": "Multiplayer: play Prisma Duel with friends in a browser",
+  "crumb": "Multiplayer",
+  "sub": "Room codes, matchmaking, and why the match keeps going if the server does not",
+  "description": "Play a turn-based space dogfight with up to four friends in the browser: no download, no account, a four-letter room code. Peer-to-peer WebRTC with a relay fallback, lockstep simulation, and what happens across NAT.",
+  "type": "TechArticle"
+}-->
+<p class="lead">Prisma Duel is a <b>free multiplayer browser game for up to four players</b>. There is nothing
+  to install and no account to make: one of you opens the game, sends the others a four-letter room code, and
+  everyone is in the same arena within a few seconds. Leave the code blank and you are matched with whoever
+  else is waiting.</p>
+<p><a class="cta" href="/">Open the game and start a room</a></p>
+
+<h2 id="how-to">How to play with friends</h2>
+<ol>
+  <li>Open <a href="/">prismaduel.com</a>. Type a callsign.</li>
+  <li>Type any 2&ndash;8 letter room code &mdash; <code>KITE</code>, <code>ROOM1</code>, whatever &mdash;
+    and press <b>JOIN ROOM</b>. If the room does not exist it is created.</li>
+  <li>Send the code to your friends. They type the same code and join.</li>
+  <li>When everyone is in, the first pilot to have joined gets a <b>START MATCH</b> button.</li>
+</ol>
+<p>Rooms take up to four pilots. A room with an empty code puts you into the oldest room with space, so
+  strangers clump together rather than each waiting alone. Room codes use no <code>I</code> or
+  <code>O</code>, so one read out over voice cannot be misheard as a digit.</p>
+
+<h2 id="turns">What a multiplayer turn looks like</h2>
+<p>The game is <a href="/how-it-works">turn-based with simultaneous resolution</a>: everyone plans at once,
+  against a 25-second clock, and the turn plays out for everyone the moment the last pilot commits. A pilot
+  who runs out the clock holds their previous course. Nobody waits for anybody in sequence, so four players
+  is exactly as fast as two.</p>
+<p>After a match, <b>REMATCH</b> asks the room rather than sending everybody back through the lobby: the
+  others get a card, and a fresh arena starts with the same pilots as soon as everyone still in the room has
+  joined.</p>
+
+<h2 id="p2p">Peer-to-peer, with a net underneath</h2>
+<p>The server does matchmaking and hands peers each other's connection details; after that, any pair of
+  players that can reach each other directly plays <b>peer-to-peer over WebRTC</b>. You can kill the server
+  in the middle of a match and that pair plays on. Any pair that cannot connect directly &mdash; symmetric
+  NAT, a corporate firewall, UDP blocked &mdash; is relayed through the server over the same WebSocket the
+  page loaded from, which works anywhere the page itself does. The HUD says <code>via server relay</code>
+  for such peers.</p>
+<p>Nothing waits for the connection to be negotiated. The relay is live from the moment you join, and each
+  pair upgrades to a direct link the instant its channel opens. A TURN server can sit in between as a
+  lower-latency relay if the operator configures one; the deployment at prismaduel.com does.</p>
+
+<h2 id="lockstep">Why it stays in sync without an authority</h2>
+<p>There is no server that owns the truth. Every client runs the same simulation, so the simulation has
+  to be <b>bit-identical on every machine</b>: the rules are a pure module with no DOM, no wall clock and no
+  <code>Math.random</code>, and each turn's trajectories are precomputed into a fixed 96-substep path that
+  every peer walks in the same order. Only one peer &mdash; the arbiter, always the lowest-numbered
+  connected seat &mdash; declares a turn, and every client, arbiter included, starts the turn from the same
+  message. That single code path is what stops a client who commits last from resolving a different set of
+  moves than the one the arbiter filled in on timeout.</p>
+<p>It is checked, not assumed: two live browsers were driven through an ordinary turn and a turn where a
+  player timed out, and both ended with identical state hashes on both peers. The headless test suite forms
+  a real six-link mesh between six browsers, plus a relay-only pair, and does the same.</p>
+
+<h2 id="dropped">If someone drops</h2>
+<p>A socket that dies keeps its seat for fifteen seconds. Refresh the page inside that window and you get
+  the same seat back with no churn for anybody else &mdash; the peer-to-peer mesh survives a blip in the
+  signalling connection. After that the seat is released and the match carries on without you.</p>
+
+<h2 id="running">Running your own</h2>
+<p>The whole server is one file with one dependency. <code>cd server &amp;&amp; npm install &amp;&amp; node
+  server.js</code> and open the printed URL; or <code>docker compose up</code>. It serves the game as well
+  as the signalling, runs read-only as an unprivileged user, and a small instance is plenty: direct pairs
+  never touch it after the handshake, and relayed pairs send it a couple of small JSON messages a second.
+  <a href="https://github.com/maxberggren/prisma-duel" rel="noopener">The source</a> has the details,
+  including how to point it at a TURN server.</p>
