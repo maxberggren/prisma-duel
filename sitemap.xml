@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
+  <url>
+    <loc>https://prisma.oooo.ws/</loc>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://prisma.oooo.ws/assets/og.png</image:loc>
+      <image:title>Prisma Duel</image:title>
+      <image:caption>A fighter fires a white laser into a dichroic crystal; the beam leaves the far side as a fan of rainbow rays.</image:caption>
+    </image:image>
+  </url>
+</urlset>

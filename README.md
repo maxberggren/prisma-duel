@@ -145,9 +145,45 @@ src/hud.{css,html}
 server/         matchmaking + signalling only
 build.js        assembles index.html from src/  (node build.js [--check])
 tools/          render/measurement helpers used during development
+assets/         icons, and the picture a shared link shows
+site.webmanifest, robots.txt, sitemap.xml
 ```
 
 `index.html` is generated. Edit the files in `src/` and run `node build.js`.
+
+## What a shared link looks like
+
+`assets/og.png` is the card X, Slack, iMessage and the rest show. It is not a
+hand-made mock-up: it is the game rendering an actual traced frame, posed by
+`tools/poster.py`, with the wordmark set on it by `tools/ogcard.py`.
+
+The pose is chosen by the start screen's own shot scorer — how much glass the
+ray crosses, how far off-axis it enters (the spread between red and violet goes
+with the sine of the angle of incidence) and how much clear run the fan has
+afterwards — swept over every crystal and a ring of firing positions, so the
+picture is the best rainbow that arena can produce rather than the first one
+found.
+
+```bash
+python3 tools/poster.py shots/hero.png --seed 20260815 --frame 1.5 --wreck 0.9 \
+                        --size 1200x630 --scale 2 --samples 96
+python3 tools/ogcard.py shots/hero.png assets/og.png     # adds the lockup
+python3 tools/icons.py                                   # logo.svg -> every icon
+```
+
+`assets/logo.svg` is the mark those icons come from: white in, crystal, spectrum
+out. It is drawn so that the parts carrying the idea are still solid colour at
+16 pixels — only the glows go.
+
+**Absolute URLs without a build-time domain.** A crawler does not run scripts,
+and X drops a relative `og:image` without saying so, so the tags have to be
+absolute in the file. They are written against `https://prisma.oooo.ws`, and
+`server.js` swaps that origin for whichever host actually served the request
+(`X-Forwarded-Host`/`-Proto` when behind a proxy). The same build is therefore
+correct on production, on a Coolify preview URL and on a laptop on the LAN, and
+`SITE_ORIGIN=https://…` moves the canonical domain without touching a file.
+Icon and manifest hrefs stay relative, because practice mode opens the page
+straight off the filesystem.
 
 ## Why it stays in sync without a server
 

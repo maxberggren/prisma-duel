@@ -1,0 +1,28 @@
+{
+  "id": "/",
+  "name": "Prisma Duel",
+  "short_name": "Prisma",
+  "description": "Turn-based laser dogfights in a mirrored arena of dichroic crystals. Fire through one and your beam refracts, disperses into a rainbow fan, and can strike people who were never in your line of sight.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "any",
+  "background_color": "#05060a",
+  "theme_color": "#05060a",
+  "categories": ["games", "entertainment"],
+  "lang": "en",
+  "dir": "ltr",
+  "icons": [
+    { "src": "assets/logo.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "assets/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "screenshots": [
+    { "src": "assets/screenshot-wide.png", "sizes": "1280x720", "type": "image/png",
+      "form_factor": "wide", "label": "A beam refracting through a crystal into a rainbow fan" },
+    { "src": "assets/screenshot-narrow.png", "sizes": "720x1280", "type": "image/png",
+      "form_factor": "narrow", "label": "The same duel on a phone" }
+  ]
+}

@@ -3,7 +3,78 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
-<title>PRISMA — Spectral Laser Simulator</title>
+<title>Prisma Duel — Turn-Based Spectral Laser Dogfight</title>
+
+<!-- ===========================================================  metadata ===
+     Every absolute URL below is written against https://prisma.oooo.ws, and
+     server.js swaps that origin for whichever host actually served the page
+     (see rewriteOrigin there). So a preview link is correct on the production
+     domain, on a Coolify preview deployment and on a laptop on the LAN, with
+     no build step and nothing to keep in sync by hand. Crawlers do not run
+     scripts, which is why this cannot be done in JS at load time.
+     Icon and manifest hrefs are deliberately RELATIVE: the game is also opened
+     straight off the filesystem (README: practice needs no server), and a
+     root-relative href is a dead link there. -->
+<meta name="description" content="Turn-based laser dogfights in a mirrored arena of dichroic crystals. Refract your shot into a rainbow and hit pilots you had no line of sight to. Free in the browser.">
+<link rel="canonical" href="https://prisma.oooo.ws/">
+<meta name="theme-color" content="#05060a">
+<meta name="color-scheme" content="dark">
+<meta name="robots" content="index,follow,max-image-preview:large">
+
+<link rel="icon" href="assets/favicon.ico" sizes="32x32">
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<meta name="apple-mobile-web-app-title" content="Prisma">
+<meta name="application-name" content="Prisma Duel">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Prisma Duel">
+<meta property="og:title" content="Prisma Duel — Turn-Based Spectral Laser Dogfight">
+<meta property="og:description" content="The weapon is a real spectral ray tracer: fire through a dichroic crystal and your beam disperses into a rainbow that can kill people you never had a line of sight to. Free in the browser, up to four pilots.">
+<meta property="og:url" content="https://prisma.oooo.ws/">
+<meta property="og:locale" content="en">
+<!-- Absolute, and PNG: X and Slack both refuse to resolve a relative og:image,
+     and the card is dropped silently rather than reported. -->
+<meta property="og:image" content="https://prisma.oooo.ws/assets/og.png">
+<meta property="og:image:secure_url" content="https://prisma.oooo.ws/assets/og.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="A fighter fires a white laser into a dichroic crystal; the beam leaves the far side as a fan of rainbow rays across the arena.">
+
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Prisma Duel — Turn-Based Spectral Laser Dogfight">
+<meta name="twitter:description" content="Fire through a crystal, disperse into a rainbow, kill what you cannot see. Turn-based laser duels, free in the browser.">
+<meta name="twitter:image" content="https://prisma.oooo.ws/assets/og.png">
+<meta name="twitter:image:alt" content="A fighter fires a white laser into a dichroic crystal; the beam leaves the far side as a fan of rainbow rays across the arena.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "VideoGame",
+  "name": "Prisma Duel",
+  "url": "https://prisma.oooo.ws/",
+  "description": "A top-down, turn-based laser dogfight whose weapon is a real spectral ray tracer and whose terrain is dichroic crystals. Fire through one and the beam refracts, disperses into a rainbow fan, and can strike people who were never in your line of sight.",
+  "image": "https://prisma.oooo.ws/assets/og.png",
+  "screenshot": "https://prisma.oooo.ws/assets/screenshot-wide.png",
+  "applicationCategory": "GameApplication",
+  "genre": ["Strategy", "Action", "Shooter"],
+  "gamePlatform": "Web browser",
+  "operatingSystem": "Any (WebGL2 browser)",
+  "playMode": ["SinglePlayer", "MultiPlayer"],
+  "numberOfPlayers": { "@type": "QuantitativeValue", "minValue": 1, "maxValue": 4 },
+  "inLanguage": "en",
+  "isAccessibleForFree": true,
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD",
+              "availability": "https://schema.org/InStock" },
+  "author": { "@type": "Person", "name": "Max Berggren" }
+}
+</script>
+<!-- ====================================================== end of metadata ===-->
 <style>
 /*#HUDCSS-BEGIN*/
   :root{

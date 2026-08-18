@@ -153,6 +153,8 @@ const MIME = {
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.wasm': 'application/wasm',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.xml': 'application/xml; charset=utf-8',
 };
 
 function safeJoin(root, urlPath) {
@@ -166,15 +168,57 @@ function safeJoin(root, urlPath) {
   return abs;
 }
 
-function serveFile(res, abs) {
+function serveFile(res, abs, req) {
   fs.stat(abs, (err, st) => {
     if (err || !st.isFile()) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('404'); }
-    res.writeHead(200, {
-      'content-type': MIME[path.extname(abs).toLowerCase()] || 'application/octet-stream',
-      'content-length': st.size,
-      'cache-control': 'no-store',
-    });
+    const ext = path.extname(abs).toLowerCase();
+    const type = MIME[ext] || 'application/octet-stream';
+    // the page, the manifest, the sitemap and robots.txt all carry the site's
+    // own origin in them, and it is not known until a request arrives
+    if (ORIGIN_FILES.has(ext)) return serveRewritten(res, abs, type, req);
+    /* Everything else here is a picture or an icon: it changes only when
+       somebody regenerates it, and the common reader is a crawler refetching
+       the card on every scrape. An hour is short enough to fix a bad card the
+       same afternoon. */
+    res.writeHead(200, { 'content-type': type, 'content-length': st.size,
+                         'cache-control': 'public, max-age=3600' });
     fs.createReadStream(abs).pipe(res).on('error', () => res.destroy());
+  });
+}
+
+/* ------------------------------------------------------- absolute URLs ----
+   A link preview needs absolute URLs -- X and Slack drop a relative og:image
+   without a word -- and a crawler does not run scripts, so the page cannot
+   fill them in at load time. The files are therefore written against the
+   canonical origin and this swaps in whichever host actually answered, which
+   is what makes the same build correct on production, on a Coolify preview
+   URL and on a laptop on the LAN.
+
+   When the request already comes in on SITE_ORIGIN the substitution finds
+   nothing and the bytes go out unchanged. */
+const SITE_ORIGIN = (process.env.SITE_ORIGIN || 'https://prisma.oooo.ws').replace(/\/+$/, '');
+const ORIGIN_FILES = new Set(['.html', '.webmanifest', '.xml', '.txt']);
+
+function requestOrigin(req) {
+  const h = req.headers || {};
+  const fwd = v => (v || '').split(',')[0].trim();
+  const host = fwd(h['x-forwarded-host']) || h.host;
+  if (!host || !/^[A-Za-z0-9._:\[\]-]+$/.test(host)) return null;   // header injection
+  const proto = fwd(h['x-forwarded-proto']) ||
+                (req.socket && req.socket.encrypted ? 'https' : 'http');
+  if (proto !== 'http' && proto !== 'https') return null;
+  return proto + '://' + host;
+}
+
+function serveRewritten(res, abs, type, req) {
+  fs.readFile(abs, 'utf8', (err, body) => {
+    if (err) { res.writeHead(404, { 'content-type': 'text/plain' }); return res.end('404'); }
+    const origin = requestOrigin(req);
+    if (origin && origin !== SITE_ORIGIN) body = body.split(SITE_ORIGIN).join(origin);
+    const buf = Buffer.from(body, 'utf8');
+    res.writeHead(200, { 'content-type': type, 'content-length': buf.length,
+                         'cache-control': 'no-store' });
+    res.end(buf);
   });
 }
 
@@ -201,11 +245,11 @@ const httpServer = http.createServer((req, res) => {
     // anything else under /__net (test harnesses) lives beside this server
     const abs = safeJoin(/^\/net\.js$/.test(rel.split('?')[0]) ? MODULE_DIR : SELF_DIR, rel);
     if (!abs) { res.writeHead(400); return res.end('bad path'); }
-    return serveFile(res, abs);
+    return serveFile(res, abs, req);
   }
   const abs = safeJoin(STATIC_ROOT, url);
   if (!abs) { res.writeHead(400, { 'content-type': 'text/plain' }); return res.end('bad path'); }
-  serveFile(res, abs);
+  serveFile(res, abs, req);
 });
 
 // ----------------------------------------------------------------- rooms ---

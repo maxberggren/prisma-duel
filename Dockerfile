@@ -62,6 +62,10 @@ WORKDIR /app
 COPY --from=deps --chown=root:root /deps/node_modules ./server/node_modules
 COPY --chown=root:root server/server.js server/package.json server/package-lock.json ./server/
 COPY --chown=root:root src/ ./src/
+# The icons, the link-preview card, and the three files a crawler asks for by
+# name. server.js serves them from STATIC_DIR beside index.html.
+COPY --chown=root:root assets/ ./assets/
+COPY --chown=root:root site.webmanifest robots.txt sitemap.xml ./
 COPY --from=build --chown=root:root /build/index.html ./index.html
 
 # STATIC_ROOT resolution walks up from server/ looking for an index.html, which

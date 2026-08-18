@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"
+     role="img" aria-label="Prisma Duel: a beam entering a crystal and leaving as a spectrum">
+  <title>Prisma Duel</title>
+  <!--
+    The mark is the game in one picture: white light in on the left, a dichroic
+    crystal in the middle, a spectrum out on the right.
+
+    It is drawn to survive a favicon. Everything that carries the idea -- the
+    crystal's silhouette, the beam, the six bands -- is a solid shape at least
+    eight units wide in this 512 box, which is half a pixel at 16px and still
+    reads as colour. The glows are decoration layered underneath and are the
+    only thing that disappears when the icon is small.
+  -->
+  <defs>
+    <linearGradient id="glass" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0"    stop-color="#3ad3e8"/>
+      <stop offset="0.42" stop-color="#3157e0"/>
+      <stop offset="1"    stop-color="#7b2fd8"/>
+    </linearGradient>
+    <linearGradient id="facet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0"   stop-color="#ffffff" stop-opacity="0.55"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="1"   stop-color="#ffffff" stop-opacity="0.22"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.42" r="0.72">
+      <stop offset="0"   stop-color="#1a2138"/>
+      <stop offset="0.6" stop-color="#0a0d16"/>
+      <stop offset="1"   stop-color="#05060a"/>
+    </radialGradient>
+    <clipPath id="cut">
+      <path d="M262 96 L372 168 L392 300 L306 386 L186 366 L154 232 Z"/>
+    </clipPath>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <filter id="softer" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="20"/>
+    </filter>
+  </defs>
+
+  <rect width="512" height="512" rx="0" fill="url(#vignette)"/>
+
+  <!-- the fan, glowing, then the same bands solid on top: the glow is what
+       makes it look like light, the solid is what makes it survive 16px -->
+  <g transform="translate(322 296)">
+    <g filter="url(#softer)" opacity="0.85">
+      <g stroke-linecap="round" stroke-width="26" fill="none">
+        <path d="M0 0 L182 -34" stroke="#ff4b3e"/>
+        <path d="M0 0 L186 6"   stroke="#ffc23d"/>
+        <path d="M0 0 L180 46"  stroke="#4ee27a"/>
+        <path d="M0 0 L166 86"  stroke="#3aa0ff"/>
+        <path d="M0 0 L148 122" stroke="#a55cff"/>
+      </g>
+    </g>
+    <g stroke-linecap="round" stroke-width="13" fill="none">
+      <path d="M4 -2 L184 -36" stroke="#ff5347"/>
+      <path d="M4 0  L188 2"   stroke="#ff9f2e"/>
+      <path d="M4 2  L186 40"  stroke="#ffd93d"/>
+      <path d="M4 4  L176 78"  stroke="#4ee27a"/>
+      <path d="M4 6  L160 112" stroke="#3aa0ff"/>
+      <path d="M4 8  L140 144" stroke="#a55cff"/>
+    </g>
+  </g>
+
+  <!-- incoming beam: glow, core, and a hot muzzle end off the left edge -->
+  <g>
+    <path d="M18 176 L206 238" stroke="#bfe6ff" stroke-width="22" stroke-linecap="round"
+          fill="none" filter="url(#soft)" opacity="0.75"/>
+    <path d="M18 176 L212 240" stroke="#ffffff" stroke-width="9" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <!-- the crystal. Six cut faces, no two alike, like the arena's -->
+  <g>
+    <path d="M262 96 L372 168 L392 300 L306 386 L186 366 L154 232 Z"
+          fill="url(#glass)" opacity="0.96"/>
+    <!-- the interference film: bands of the same cut, shrunk and offset, which
+         is what the arena's crystals look like under the deck light -->
+    <g clip-path="url(#cut)" opacity="0.5">
+      <path d="M300 84 C246 176 250 250 214 396" fill="none" stroke="#6ceaf5"
+            stroke-width="30" stroke-linecap="round"/>
+      <path d="M356 132 C300 214 306 286 268 404" fill="none" stroke="#9a74ff"
+            stroke-width="22" stroke-linecap="round" opacity="0.85"/>
+    </g>
+    <path d="M262 96 L372 168 L392 300 L306 386 L186 366 L154 232 Z"
+          fill="url(#facet)"/>
+    <path d="M262 96 L372 168 L392 300 L306 386 L186 366 L154 232 Z"
+          fill="none" stroke="#e8f2ff" stroke-width="7" stroke-linejoin="round" opacity="0.9"/>
+    <!-- the ray's path through the glass, bent at both faces -->
+    <path d="M206 238 L322 296" stroke="#ffffff" stroke-width="7" stroke-linecap="round"
+          fill="none" opacity="0.92"/>
+  </g>
+</svg>

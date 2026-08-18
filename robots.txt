@@ -1,0 +1,12 @@
+# Prisma Duel. One page, and it is meant to be found.
+User-agent: *
+Allow: /
+
+# Room state and health, useful to nobody but the operator.
+Disallow: /rooms.json
+Disallow: /healthz
+Disallow: /__net/
+
+# server.js rewrites this origin to whatever host actually served the file,
+# so a preview deployment does not advertise production's sitemap.
+Sitemap: https://prisma.oooo.ws/sitemap.xml

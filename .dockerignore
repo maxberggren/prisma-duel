@@ -13,6 +13,11 @@ regions/
 docs/
 *.png
 
+# ...but the icons and the link-preview card are part of what is served, and
+# the blanket *.png above would otherwise leave the deployed page with a
+# missing favicon and a dead og:image.
+!assets/*.png
+
 # Installed locally by npm; the image installs its own from the lockfile.
 node_modules/
 **/node_modules/
